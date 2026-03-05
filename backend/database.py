@@ -37,25 +37,34 @@ _pool = None
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS jobs (
-    id              VARCHAR(32)   PRIMARY KEY,
-    csv_file_names  TEXT          NOT NULL,
-    notebook_title  TEXT          NOT NULL,
-    instructions    TEXT          NOT NULL,
-    style           VARCHAR(32),
-    format          VARCHAR(32),
-    language        VARCHAR(8),
-    timeout         INTEGER,
-    status          VARCHAR(16)   NOT NULL DEFAULT 'pending',
-    steps           JSON          NOT NULL,
-    current_step    VARCHAR(32),
-    error_message   TEXT,
-    callback_url    TEXT,
-    created_at      DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at      DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
-                    ON UPDATE CURRENT_TIMESTAMP(6),
-    completed_at    DATETIME(6)
+    id               VARCHAR(32)   PRIMARY KEY,
+    job_type         VARCHAR(16)   NOT NULL DEFAULT 'video',
+    csv_file_names   TEXT          NOT NULL,
+    notebook_title   TEXT          NOT NULL,
+    instructions     TEXT          NOT NULL,
+    style            VARCHAR(32),
+    format           VARCHAR(32),
+    language         VARCHAR(8),
+    timeout          INTEGER,
+    status           VARCHAR(16)   NOT NULL DEFAULT 'pending',
+    steps            JSON          NOT NULL,
+    current_step     VARCHAR(32),
+    error_message    TEXT,
+    callback_url     TEXT,
+    voice_name       VARCHAR(64),
+    generated_script LONGTEXT,
+    created_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+                     ON UPDATE CURRENT_TIMESTAMP(6),
+    completed_at     DATETIME(6)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 """
+
+_ALTER_TABLE_SQLS = [
+    "ALTER TABLE jobs ADD COLUMN job_type VARCHAR(16) NOT NULL DEFAULT 'video'",
+    "ALTER TABLE jobs ADD COLUMN voice_name VARCHAR(64)",
+    "ALTER TABLE jobs ADD COLUMN generated_script LONGTEXT",
+]
 
 
 def _now() -> str:
@@ -112,6 +121,12 @@ async def init_db() -> None:
     async with _pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(_CREATE_TABLE_SQL)
+            # 既存テーブルへのカラム追加（idempotent: カラムが既存なら無視）
+            for sql in _ALTER_TABLE_SQLS:
+                try:
+                    await cur.execute(sql)
+                except Exception:
+                    pass  # カラムが既に存在する場合は無視
 
     logger.info("MySQL 接続プールを初期化しました（host=%s, db=%s）", params["host"], params["db"])
 
@@ -153,11 +168,12 @@ def _row_to_dict(row: dict) -> dict:
 
     return {
         "id": row["id"],
+        "jobType": row.get("job_type", "video"),
         "csvFileNames": row["csv_file_names"],
         "notebookTitle": row["notebook_title"],
         "instructions": row["instructions"],
-        "style": row["style"],
-        "format": row["format"],
+        "style": row.get("style"),
+        "format": row.get("format"),
         "language": row["language"],
         "timeout": row["timeout"],
         "status": row["status"],
@@ -165,6 +181,8 @@ def _row_to_dict(row: dict) -> dict:
         "currentStep": row["current_step"],
         "errorMessage": row["error_message"],
         "callbackUrl": row["callback_url"],
+        "voiceName": row.get("voice_name"),
+        "generatedScript": row.get("generated_script"),
         "createdAt": _fmt_ts(row["created_at"]),
         "updatedAt": _fmt_ts(row["updated_at"]),
         "completedAt": _fmt_ts(row["completed_at"]),
@@ -188,19 +206,22 @@ async def store_create(job: dict) -> dict:
             await cur.execute(
                 """
                 INSERT INTO jobs (
-                    id, csv_file_names, notebook_title, instructions,
+                    id, job_type, csv_file_names, notebook_title, instructions,
                     style, format, language, timeout,
                     status, steps, current_step, error_message, callback_url,
+                    voice_name, generated_script,
                     created_at, updated_at, completed_at
                 ) VALUES (
-                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
+                    %s, %s,
                     %s, %s, %s
                 )
                 """,
                 (
                     job["id"],
+                    job.get("jobType", "video"),
                     job["csvFileNames"],
                     job["notebookTitle"],
                     job["instructions"],
@@ -213,6 +234,8 @@ async def store_create(job: dict) -> dict:
                     job.get("currentStep"),
                     job.get("errorMessage"),
                     job.get("callbackUrl"),
+                    job.get("voiceName"),
+                    job.get("generatedScript"),
                     job["createdAt"],
                     job["updatedAt"],
                     job.get("completedAt"),
@@ -245,7 +268,7 @@ async def store_get(job_id: str) -> dict:
     return _row_to_dict(row)
 
 
-async def store_list(status: Optional[str] = None) -> list[dict]:
+async def store_list(status: Optional[str] = None, job_type: Optional[str] = None) -> list[dict]:
     """ジョブ一覧を取得する（作成日時降順）"""
     if not _USE_MYSQL:
         async with _store_lock:
@@ -253,17 +276,26 @@ async def store_list(status: Optional[str] = None) -> list[dict]:
         jobs.sort(key=lambda j: j["createdAt"], reverse=True)
         if status and status != "all":
             jobs = [j for j in jobs if j["status"] == status]
+        if job_type and job_type != "all":
+            jobs = [j for j in jobs if j.get("jobType", "video") == job_type]
         return jobs
+
+    conditions: list[str] = []
+    params: list = []
+    if status and status != "all":
+        conditions.append("status = %s")
+        params.append(status)
+    if job_type and job_type != "all":
+        conditions.append("job_type = %s")
+        params.append(job_type)
 
     async with _pool.acquire() as conn:
         async with conn.cursor() as cur:
-            if status and status != "all":
-                await cur.execute(
-                    "SELECT * FROM jobs WHERE status = %s ORDER BY created_at DESC",
-                    (status,),
-                )
-            else:
-                await cur.execute("SELECT * FROM jobs ORDER BY created_at DESC")
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            await cur.execute(
+                f"SELECT * FROM jobs {where} ORDER BY created_at DESC",
+                params,
+            )
             rows = await cur.fetchall()
 
     return [_row_to_dict(r) for r in rows]
@@ -286,6 +318,8 @@ async def store_update(job_id: str, **kwargs) -> dict:
         "currentStep": "current_step",
         "errorMessage": "error_message",
         "completedAt": "completed_at",
+        "voiceName": "voice_name",
+        "generatedScript": "generated_script",
     }
 
     set_clauses: list[str] = []

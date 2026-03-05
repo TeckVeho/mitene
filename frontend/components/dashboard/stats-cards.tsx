@@ -2,7 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useJobStats } from "@/hooks/use-jobs";
-import { FileVideo, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { Layers, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface StatCard {
@@ -40,7 +40,7 @@ export function StatsCards() {
     {
       label: "総生成数",
       value: data?.total ?? 0,
-      icon: FileVideo,
+      icon: Layers,
       iconClass: "text-muted-foreground",
       bgClass: "bg-muted/50",
     },

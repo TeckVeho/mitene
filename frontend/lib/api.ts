@@ -1,4 +1,4 @@
-import type { AuthStatus, CreateJobPayload, Job, JobStats } from "./types";
+import type { AuthStatus, CreateAudioJobPayload, CreateJobPayload, Job, JobStats } from "./types";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
 
@@ -9,6 +9,7 @@ const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
 const MOCK_JOBS: Job[] = [
   {
     id: "job_001",
+    jobType: "video",
     csvFileNames: "安全運転一覧_埼玉営業所（車両毎）_202601_.csv",
     notebookTitle: "安全運転レポート 202601",
     instructions: "CSVデータの主要な傾向と示唆を分かりやすく解説してください",
@@ -31,6 +32,7 @@ const MOCK_JOBS: Job[] = [
   },
   {
     id: "job_002",
+    jobType: "video",
     csvFileNames: "走行管理一覧_埼玉営業所（車両毎）_202601_.csv",
     notebookTitle: "走行管理レポート 202601",
     instructions: "走行距離と燃費の傾向を詳しく解説してください",
@@ -52,6 +54,7 @@ const MOCK_JOBS: Job[] = [
   },
   {
     id: "job_003",
+    jobType: "video",
     csvFileNames: "バック一覧_埼玉営業所（車両毎）_202601_.csv",
     notebookTitle: "バック動作分析 202601",
     instructions: "バック回数と速度超過の関連性を分析してください",
@@ -71,6 +74,28 @@ const MOCK_JOBS: Job[] = [
     errorMessage: "ソースのインデックス作成がタイムアウトしました。CSVファイルのサイズを確認してください。",
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
     updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+  },
+  {
+    id: "job_004",
+    jobType: "audio",
+    csvFileNames: "安全運転一覧_埼玉営業所（車両毎）_202601_.csv",
+    notebookTitle: "安全運転レポート 音声解説",
+    instructions: "CSVデータの主要な傾向と示唆を分かりやすく解説してください",
+    language: "ja",
+    timeout: 600,
+    status: "completed",
+    voiceName: "Kore",
+    generatedScript: "今月の安全運転レポートをご説明します。今月は全体的に安全スコアが改善され...",
+    steps: [
+      { id: "read_csv", label: "CSV読み込み", status: "completed" },
+      { id: "generate_script", label: "解説原稿生成", status: "completed" },
+      { id: "generate_audio", label: "音声生成", status: "completed" },
+      { id: "download_ready", label: "ダウンロード準備完了", status: "completed" },
+    ],
+    currentStep: "download_ready",
+    createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
+    completedAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
   },
 ];
 
@@ -92,10 +117,12 @@ async function mockGetStats(): Promise<JobStats> {
   };
 }
 
-async function mockGetJobs(status?: string): Promise<Job[]> {
+async function mockGetJobs(status?: string, type?: string): Promise<Job[]> {
   await mockDelay();
-  if (!status || status === "all") return MOCK_JOBS;
-  return MOCK_JOBS.filter((j) => j.status === status);
+  let jobs = MOCK_JOBS;
+  if (status && status !== "all") jobs = jobs.filter((j) => j.status === status);
+  if (type && type !== "all") jobs = jobs.filter((j) => j.jobType === type);
+  return jobs;
 }
 
 async function mockGetJob(id: string): Promise<Job> {
@@ -109,6 +136,7 @@ async function mockCreateJob(payload: CreateJobPayload): Promise<Job> {
   await mockDelay(800);
   const newJob: Job = {
     id: `job_${Date.now()}`,
+    jobType: "video",
     csvFileNames: payload.csvFiles.map((f) => f.name).join(","),
     notebookTitle: payload.notebookTitle,
     instructions: payload.instructions,
@@ -131,6 +159,31 @@ async function mockCreateJob(payload: CreateJobPayload): Promise<Job> {
   return newJob;
 }
 
+async function mockCreateAudioJob(payload: CreateAudioJobPayload): Promise<Job> {
+  await mockDelay(800);
+  const newJob: Job = {
+    id: `job_${Date.now()}`,
+    jobType: "audio",
+    csvFileNames: payload.csvFiles.map((f) => f.name).join(","),
+    notebookTitle: payload.title,
+    instructions: payload.instructions,
+    language: payload.language,
+    timeout: payload.timeout,
+    voiceName: payload.voiceName,
+    status: "pending",
+    steps: [
+      { id: "read_csv", label: "CSV読み込み", status: "pending" },
+      { id: "generate_script", label: "解説原稿生成", status: "pending" },
+      { id: "generate_audio", label: "音声生成", status: "pending" },
+      { id: "download_ready", label: "ダウンロード準備完了", status: "pending" },
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  MOCK_JOBS.unshift(newJob);
+  return newJob;
+}
+
 // ---------------------------------------------------------------------------
 // Real API implementations
 // ---------------------------------------------------------------------------
@@ -143,8 +196,12 @@ async function realGetStats(): Promise<JobStats> {
   return res.json();
 }
 
-async function realGetJobs(status?: string): Promise<Job[]> {
-  const url = status && status !== "all" ? `${BASE_URL}/jobs?status=${status}` : `${BASE_URL}/jobs`;
+async function realGetJobs(status?: string, type?: string): Promise<Job[]> {
+  const params = new URLSearchParams();
+  if (status && status !== "all") params.set("status", status);
+  if (type && type !== "all") params.set("type", type);
+  const query = params.toString();
+  const url = query ? `${BASE_URL}/jobs?${query}` : `${BASE_URL}/jobs`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("ジョブ一覧の取得に失敗しました");
   return res.json();
@@ -170,6 +227,22 @@ async function realCreateJob(payload: CreateJobPayload): Promise<Job> {
 
   const res = await fetch(`${BASE_URL}/jobs`, { method: "POST", body: formData });
   if (!res.ok) throw new Error("ジョブの作成に失敗しました");
+  return res.json();
+}
+
+async function realCreateAudioJob(payload: CreateAudioJobPayload): Promise<Job> {
+  const formData = new FormData();
+  for (const file of payload.csvFiles) {
+    formData.append("csvFiles", file);
+  }
+  formData.append("title", payload.title);
+  formData.append("instructions", payload.instructions);
+  formData.append("voiceName", payload.voiceName);
+  formData.append("language", payload.language);
+  formData.append("timeout", String(payload.timeout));
+
+  const res = await fetch(`${BASE_URL}/audio-jobs`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error("音声ジョブの作成に失敗しました");
   return res.json();
 }
 
@@ -204,6 +277,7 @@ export const api = {
   getJobs: USE_MOCK ? mockGetJobs : realGetJobs,
   getJob: USE_MOCK ? mockGetJob : realGetJob,
   createJob: USE_MOCK ? mockCreateJob : realCreateJob,
+  createAudioJob: USE_MOCK ? mockCreateAudioJob : realCreateAudioJob,
   getAuthStatus: USE_MOCK ? mockGetAuthStatus : realGetAuthStatus,
   triggerLogin: USE_MOCK ? mockTriggerLogin : realTriggerLogin,
 

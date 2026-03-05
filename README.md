@@ -1,12 +1,17 @@
-# notebooklm-py: CSVファイルから解説動画(MP4)を生成する手順書
+# notebooklm-csv-to-video: CSV から AI 解説コンテンツを生成する
 
-[notebooklm-py](https://github.com/teng-lin/notebooklm-py) を使って、CSVファイルをソースとして
-Google NotebookLM のノートブックに追加し、解説動画 (Video Overview) を生成して
-MP4ファイルをダウンロードするまでの完全な手順書です。
+CSVファイルをアップロードするだけで、AIが解説動画（MP4）または音声解説（WAV）を自動生成する
+**NoteVideo** の利用手順書です。
 
-> **注意**: notebooklm-py は非公式ライブラリです。Googleの内部APIを利用しているため、
-> 予告なく動作しなくなる可能性があります。プロトタイプ・研究・個人プロジェクトでの
-> 利用を推奨します。
+## 生成モード
+
+| モード | エンジン | 出力 | 特徴 |
+|--------|---------|------|------|
+| **動画生成** | Google NotebookLM (notebooklm-py) | MP4 | ビジュアル付き解説動画 |
+| **音声生成** | Google Gemini LLM + TTS | WAV | テキスト原稿生成 → 音声読み上げ |
+
+> **注意**: NotebookLM 動画生成モードは非公式ライブラリ (notebooklm-py) を使用しています。
+> Googleの内部APIを利用しているため、予告なく動作しなくなる可能性があります。
 
 ---
 
@@ -14,21 +19,23 @@ MP4ファイルをダウンロードするまでの完全な手順書です。
 
 1. [前提条件](#前提条件)
 2. [手順1: インストール](#手順1-インストール)
-3. [手順2: 認証](#手順2-認証-初回のみ)
+3. [手順2: 認証（動画生成モード）](#手順2-認証-動画生成モードのみ-初回のみ)
 4. [手順3: 言語設定 (任意)](#手順3-言語設定-任意)
 5. [手順4: ノートブック作成](#手順4-ノートブック作成)
 6. [手順5: CSVファイルをソースとして追加](#手順5-csvファイルをソースとして追加)
 7. [手順6: 解説動画を生成](#手順6-解説動画を生成)
 8. [手順7: MP4ファイルをダウンロード](#手順7-mp4ファイルをダウンロード)
-9. [Python APIで一括実行する場合](#python-apiで一括実行する場合)
-10. [トラブルシューティング](#トラブルシューティング)
+9. [音声生成モード (Gemini API)](#音声生成モード-gemini-api)
+10. [Python APIで一括実行する場合](#python-apiで一括実行する場合)
+11. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
 ## 前提条件
 
 - Python **3.10 以上**がインストールされていること
-- **Googleアカウント**を持っていること
+- **Googleアカウント**を持っていること（動画生成モード）
+- **Google AI API キー**（音声生成モード: `GEMINI_API_KEY`）
 - 対象の **CSVファイル**が手元にあること
 
 ---
@@ -43,6 +50,12 @@ pip install "notebooklm-py[browser]"
 playwright install chromium
 ```
 
+音声生成モードを使う場合は、追加で Gemini SDK をインストールします:
+
+```bash
+pip install google-genai
+```
+
 インストール確認:
 
 ```bash
@@ -51,7 +64,7 @@ notebooklm --version
 
 ---
 
-## 手順2: 認証 (初回のみ)
+## 手順2: 認証 (動画生成モードのみ・初回のみ)
 
 Chromiumブラウザが自動で開きます。Googleアカウントでログインし、
 完了後にターミナルで **Enter** を押してセッションを保存します。
@@ -244,6 +257,49 @@ notebooklm download video ./output_video.mp4 -a <artifact_id>
 
 ---
 
+## 音声生成モード (Gemini API)
+
+Google NotebookLM を使わず、**Gemini LLM + TTS** でCSVデータの音声解説（WAVファイル）を生成する
+モードです。NotebookLM のログインは不要で、Google AI API キーのみで動作します。
+
+### 仕組み
+
+```
+CSV読み込み → Gemini LLM で解説原稿を生成 → Gemini TTS で音声生成 → WAV保存
+```
+
+### 事前準備
+
+```bash
+# Gemini SDK のインストール
+pip install google-genai
+
+# 環境変数の設定
+export GEMINI_API_KEY="your_api_key_here"
+```
+
+API キーは [Google AI Studio](https://aistudio.google.com/apikey) から取得できます。
+
+### 利用可能なボイス
+
+| ボイス名 | 説明 |
+|---------|------|
+| `Kore` | 落ち着いた女性の声（デフォルト） |
+| `Puck` | 活発で明るい男性の声 |
+| `Charon` | 深みのある落ち着いた男性の声 |
+| `Aoede` | 明るく柔らかい女性の声 |
+| `Fenrir` | 力強い男性の声 |
+| `Leda` | 穏やかな女性の声 |
+| `Orus` | クリアな男性の声 |
+| `Zephyr` | 軽やかな明るい声 |
+
+### 出力フォーマット
+
+- 形式: WAV (PCM 24kHz / モノラル / 16bit)
+- モデル: `gemini-2.5-flash`（原稿生成）、`gemini-2.5-flash-preview-tts`（音声合成）
+
+---
+
 ## Python APIで一括実行する場合
 
 CLIコマンドを順番に手動実行する代わりに、Pythonスクリプトで全工程を自動化できます。
@@ -313,11 +369,21 @@ notebooklm source list
 # STATUS が READY になっていれば処理完了
 ```
 
+### 音声生成で `GEMINI_API_KEY が設定されていません` エラーが出る
+
+環境変数 `GEMINI_API_KEY` を設定してください:
+
+```bash
+export GEMINI_API_KEY="your_api_key_here"
+```
+
+[Google AI Studio](https://aistudio.google.com/apikey) でAPIキーを発行できます。
+
 ---
 
 ## 注意事項
 
-- **非公式ライブラリ**: Googleとの提携はなく、内部APIの変更により予告なく動作しなくなる可能性があります
+- **非公式ライブラリ**: notebooklm-py は Googleとの提携はなく、内部APIの変更により予告なく動作しなくなる可能性があります
 - **レート制限**: 短時間の連続リクエストは制限される場合があります
 - **セッション管理**: `~/.notebooklm/storage_state.json` にはGoogleの認証情報が含まれます。取り扱いに注意してください
-- **最新バージョン**: v0.3.3 (2026年3月3日リリース)
+- **最新バージョン**: notebooklm-py v0.3.3 (2026年3月3日リリース)

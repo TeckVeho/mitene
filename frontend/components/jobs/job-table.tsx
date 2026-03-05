@@ -16,15 +16,17 @@ import type { Job } from "@/lib/types";
 import { VIDEO_STYLE_LABELS } from "@/lib/types";
 import { formatDistanceToNow } from "@/lib/date-utils";
 import { api } from "@/lib/api";
-import { ArrowRight, Download, FileSpreadsheet, Video } from "lucide-react";
+import { ArrowRight, Download, FileSpreadsheet, Video, Mic } from "lucide-react";
 
 interface JobTableProps {
   jobs: Job[];
 }
 
-function getProgress(step?: string): number {
-  const steps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
-  const idx = steps.indexOf(step ?? "");
+function getProgress(job: Job): number {
+  const videoSteps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
+  const audioSteps = ["read_csv", "generate_script", "generate_audio", "download_ready"];
+  const steps = job.jobType === "audio" ? audioSteps : videoSteps;
+  const idx = steps.indexOf(job.currentStep ?? "");
   if (idx === -1) return 0;
   return ((idx + 1) / steps.length) * 100;
 }
@@ -35,9 +37,9 @@ function EmptyState() {
       <div className="flex items-center justify-center size-14 rounded-full bg-muted mb-4">
         <Video className="size-6 text-muted-foreground" />
       </div>
-      <p className="text-sm font-medium text-foreground mb-1">動画がありません</p>
+      <p className="text-sm font-medium text-foreground mb-1">ジョブがありません</p>
       <p className="text-xs text-muted-foreground mb-5">
-        まだ動画が生成されていません。CSVファイルをアップロードして始めましょう。
+        まだジョブが生成されていません。CSVファイルをアップロードして始めましょう。
       </p>
       <Button asChild size="sm">
         <Link href="/generate">最初の動画を生成する</Link>
@@ -56,11 +58,11 @@ export function JobTable({ jobs }: JobTableProps) {
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/30 hover:bg-muted/30">
-            <TableHead className="text-xs font-semibold text-muted-foreground w-[280px]">
+            <TableHead className="text-xs font-semibold text-muted-foreground w-8">種別</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground w-[260px]">
               ファイル名
             </TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground">スタイル</TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground">フォーマット</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground">詳細</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground">ステータス</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground">作成日時</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground text-right">操作</TableHead>
@@ -70,32 +72,43 @@ export function JobTable({ jobs }: JobTableProps) {
           {jobs.map((job) => (
             <TableRow key={job.id} className="group hover:bg-muted/20">
               <TableCell>
+                <div className="flex items-center justify-center size-7 rounded-md bg-muted shrink-0">
+                  {job.jobType === "audio" ? (
+                    <Mic className="size-3.5 text-muted-foreground" />
+                  ) : (
+                    <Video className="size-3.5 text-muted-foreground" />
+                  )}
+                </div>
+              </TableCell>
+              <TableCell>
                 <div className="flex items-center gap-2.5">
                   <div className="flex items-center justify-center size-7 rounded-md bg-muted shrink-0">
                     <FileSpreadsheet className="size-3.5 text-muted-foreground" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate text-foreground max-w-[220px]">
+                    <p className="text-sm font-medium truncate text-foreground max-w-[200px]">
                       {job.csvFileNames}
                     </p>
                     {job.status === "processing" && (
                       <Progress
                         className="h-1 mt-1 w-[140px]"
-                        value={getProgress(job.currentStep)}
+                        value={getProgress(job)}
                       />
                     )}
                   </div>
                 </div>
               </TableCell>
               <TableCell>
-                <span className="text-sm text-muted-foreground">
-                  {VIDEO_STYLE_LABELS[job.style].label}
-                </span>
-              </TableCell>
-              <TableCell>
-                <span className="text-sm text-muted-foreground">
-                  {job.format === "explainer" ? "解説型" : "短縮版"}
-                </span>
+                {job.jobType === "audio" ? (
+                  <span className="text-sm text-muted-foreground">
+                    {job.voiceName ?? "—"}
+                  </span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    {job.style ? VIDEO_STYLE_LABELS[job.style]?.label : "—"}
+                    {job.format ? ` / ${job.format === "explainer" ? "解説型" : "短縮版"}` : ""}
+                  </span>
+                )}
               </TableCell>
               <TableCell>
                 <JobStatusBadge status={job.status} />

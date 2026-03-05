@@ -3,6 +3,8 @@ uvicorn[standard]>=0.34.0
 python-multipart>=0.0.20
 notebooklm-py[browser]
 httpx>=0.28.0
+# Google Gemini AI（音声生成機能で使用）
+google-genai>=1.0.0
 # AWS S3 連携（S3_BUCKET_NAME 環境変数が設定されている場合に使用）
 boto3>=1.35.0
 # MySQL / RDS 連携（DATABASE_URL 環境変数が設定されている場合に使用）

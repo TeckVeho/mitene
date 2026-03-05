@@ -4,27 +4,25 @@ import { useState } from "react";
 import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ChevronDown, ChevronUp, Video, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Mic, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { CsvUpload } from "./csv-upload";
-import { StyleSelector } from "./style-selector";
-import { FormatSelector } from "./format-selector";
-import { useGenerateVideo } from "@/hooks/use-generate";
+import { CsvUpload } from "@/components/generate/csv-upload";
+import { VoiceSelector } from "./voice-selector";
+import { useGenerateAudio } from "@/hooks/use-generate-audio";
 import { cn } from "@/lib/utils";
 import { INSTRUCTION_PRESETS, DEFAULT_PRESET_ID, getPresetById } from "@/lib/instruction-presets";
 
 const schema = z.object({
-  notebookTitle: z.string().min(1, "タイトルを入力してください").max(100),
-  instructions: z.string().min(1, "指示文を入力してください").max(1000),
-  style: z.enum(["auto", "classic", "whiteboard", "kawaii", "anime", "watercolor", "retro-print", "heritage", "paper-craft"]),
-  format: z.enum(["explainer", "brief"]),
+  title: z.string().min(1, "タイトルを入力してください").max(100),
+  instructions: z.string().min(1, "指示文を入力してください").max(2000),
+  voiceName: z.string().min(1),
   language: z.string().min(1),
-  timeout: z.coerce.number().min(60).max(7200),
+  timeout: z.coerce.number().min(60).max(3600),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -53,12 +51,12 @@ function FormSection({
   );
 }
 
-export function GenerateForm() {
+export function AudioGenerateForm() {
   const [csvFiles, setCsvFiles] = useState<File[]>([]);
   const [csvError, setCsvError] = useState<string>("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET_ID);
-  const { mutate: generate, isPending } = useGenerateVideo();
+  const { mutate: generate, isPending } = useGenerateAudio();
 
   const defaultInstructions = getPresetById(DEFAULT_PRESET_ID)?.text ?? "";
 
@@ -71,12 +69,11 @@ export function GenerateForm() {
   } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: {
-      notebookTitle: "ドライバー走行レポート",
+      title: "ドライバー走行レポート",
       instructions: defaultInstructions,
-      style: "whiteboard",
-      format: "explainer",
+      voiceName: "Kore",
       language: "ja",
-      timeout: 1800,
+      timeout: 600,
     },
   });
 
@@ -104,10 +101,9 @@ export function GenerateForm() {
     }
     generate({
       csvFiles,
-      notebookTitle: values.notebookTitle,
+      title: values.title,
       instructions: values.instructions,
-      style: values.style,
-      format: values.format,
+      voiceName: values.voiceName,
       language: values.language,
       timeout: values.timeout,
     });
@@ -117,35 +113,31 @@ export function GenerateForm() {
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-7">
       {/* CSV Upload */}
       <FormSection title="CSVファイル">
-        <CsvUpload
-          value={csvFiles}
-          onChange={handleCsvChange}
-          error={csvError}
-        />
+        <CsvUpload value={csvFiles} onChange={handleCsvChange} error={csvError} />
       </FormSection>
 
       <Separator />
 
-      {/* Notebook settings */}
-      <FormSection title="ノートブック設定">
+      {/* Basic settings */}
+      <FormSection title="基本設定">
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="notebookTitle" className="text-xs text-muted-foreground font-medium">
+            <Label htmlFor="title" className="text-xs text-muted-foreground font-medium">
               タイトル
             </Label>
             <Input
-              id="notebookTitle"
+              id="title"
               placeholder="例: 埼玉営業所 202601 走行レポート"
-              {...register("notebookTitle")}
-              className={cn(errors.notebookTitle && "border-destructive")}
+              {...register("title")}
+              className={cn(errors.title && "border-destructive")}
             />
-            {errors.notebookTitle && (
-              <p className="text-xs text-destructive">{errors.notebookTitle.message}</p>
+            {errors.title && (
+              <p className="text-xs text-destructive">{errors.title.message}</p>
             )}
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground font-medium">
-              動画への指示文
+              解説への指示文
             </Label>
             <Select value={selectedPresetId} onValueChange={handlePresetChange}>
               <SelectTrigger>
@@ -175,26 +167,13 @@ export function GenerateForm() {
 
       <Separator />
 
-      {/* Style */}
-      <FormSection title="ビジュアルスタイル">
+      {/* Voice selection */}
+      <FormSection title="ボイス選択">
         <Controller
-          name="style"
+          name="voiceName"
           control={control}
           render={({ field }) => (
-            <StyleSelector value={field.value} onChange={field.onChange} />
-          )}
-        />
-      </FormSection>
-
-      <Separator />
-
-      {/* Format */}
-      <FormSection title="動画フォーマット">
-        <Controller
-          name="format"
-          control={control}
-          render={({ field }) => (
-            <FormatSelector value={field.value} onChange={field.onChange} />
+            <VoiceSelector value={field.value} onChange={field.onChange} />
           )}
         />
       </FormSection>
@@ -245,7 +224,7 @@ export function GenerateForm() {
                 id="timeout"
                 type="number"
                 min={60}
-                max={7200}
+                max={3600}
                 {...register("timeout")}
                 className={cn(errors.timeout && "border-destructive")}
               />
@@ -272,8 +251,8 @@ export function GenerateForm() {
             </>
           ) : (
             <>
-              <Video className="size-4" />
-              動画を生成する
+              <Mic className="size-4" />
+              音声を生成する
             </>
           )}
         </Button>

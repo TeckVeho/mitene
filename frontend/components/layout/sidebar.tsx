@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { LayoutDashboard, Video, History, ChevronLeft, ChevronRight, FileVideo } from "lucide-react";
+import { LayoutDashboard, Video, History, ChevronLeft, ChevronRight, FileVideo, Mic } from "lucide-react";
 import { SidebarItem } from "./sidebar-item";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 const NAV_ITEMS = [
   { href: "/", icon: LayoutDashboard, label: "ダッシュボード", exact: true },
   { href: "/generate", icon: Video, label: "新規動画生成" },
+  { href: "/generate-audio", icon: Mic, label: "新規音声生成" },
   { href: "/jobs", icon: History, label: "生成履歴" },
 ];
 

@@ -1,12 +1,13 @@
 """
 外部API v1 ルーター
-他システムから本システムのCSV→動画生成処理を実行するためのエンドポイント群。
+他システムから本システムのCSV→動画生成・音声生成処理を実行するためのエンドポイント群。
 
 認証: X-API-Key ヘッダー（環境変数 NOTEVIDEO_API_KEYS で設定）
 """
 
 import asyncio
 import base64
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,8 +68,22 @@ class ExternalJobRequest(BaseModel):
     csv_files: list[CsvFileInput]
 
 
+class ExternalAudioJobRequest(BaseModel):
+    """外部APIからの音声ジョブ作成リクエスト（JSON形式）"""
+
+    title: str = "CSV音声解説"
+    instructions: str = "CSVデータの主要な傾向と示唆を分かりやすく解説してください"
+    voice_name: str = "Kore"
+    """Gemini TTS ボイス名（例: Kore / Charon / Fenrir / Aoede / Puck）"""
+    language: str = "ja"
+    timeout: int = 600
+    callback_url: Optional[str] = None
+    """完了・エラー時にWebhookで通知するURL（任意）"""
+    csv_files: list[CsvFileInput]
+
+
 class JobResponse(BaseModel):
-    """ジョブレスポンス"""
+    """動画ジョブレスポンス"""
 
     id: str
     csvFileNames: str
@@ -78,6 +93,28 @@ class JobResponse(BaseModel):
     format: str
     language: str
     timeout: int
+    status: str
+    steps: list[dict]
+    currentStep: Optional[str] = None
+    errorMessage: Optional[str] = None
+    createdAt: str
+    updatedAt: str
+    completedAt: Optional[str] = None
+    callbackUrl: Optional[str] = None
+
+
+class AudioJobResponse(BaseModel):
+    """音声ジョブレスポンス"""
+
+    id: str
+    jobType: str
+    csvFileNames: str
+    notebookTitle: str
+    instructions: str
+    language: str
+    timeout: int
+    voiceName: Optional[str] = None
+    generatedScript: Optional[str] = None
     status: str
     steps: list[dict]
     currentStep: Optional[str] = None
@@ -110,6 +147,8 @@ def register_store_functions(
     initial_steps_fn,
     run_job_fn,
     semaphore: asyncio.Semaphore,
+    audio_initial_steps_fn=None,
+    run_audio_job_fn=None,
     raw_store: dict | None = None,
     raw_lock: asyncio.Lock | None = None,
 ) -> None:
@@ -121,6 +160,10 @@ def register_store_functions(
     _store_fns["initial_steps"] = initial_steps_fn
     _store_fns["run_job"] = run_job_fn
     _store_fns["semaphore"] = semaphore
+    if audio_initial_steps_fn is not None:
+        _store_fns["audio_initial_steps"] = audio_initial_steps_fn
+    if run_audio_job_fn is not None:
+        _store_fns["run_audio_job"] = run_audio_job_fn
 
 
 def _now() -> str:
@@ -305,4 +348,182 @@ async def download_job_v1(
         path=str(output_path),
         media_type="video/mp4",
         filename=f"{safe_title}.mp4",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Audio job endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/audio-jobs",
+    response_model=AudioJobResponse,
+    status_code=201,
+    summary="音声ジョブ作成（JSON形式）",
+    description=(
+        "CSVファイルをBase64エンコードまたはサーバーパスで指定し、音声解説生成ジョブを作成します。\n\n"
+        "処理ステップ:\n"
+        "1. CSV読み込み\n"
+        "2. Gemini LLMで解説原稿を生成\n"
+        "3. Gemini TTSでWAV音声を生成\n"
+        "4. ダウンロード準備完了\n\n"
+        "必要な環境変数: `GEMINI_API_KEY`\n\n"
+        "利用可能なボイス名: `Kore` / `Charon` / `Fenrir` / `Aoede` / `Puck`"
+    ),
+)
+async def create_audio_job_v1(
+    request: ExternalAudioJobRequest,
+    background_tasks: BackgroundTasks,
+    _api_key: str = Depends(verify_api_key),
+) -> AudioJobResponse:
+    if "run_audio_job" not in _store_fns:
+        raise HTTPException(status_code=503, detail="音声ジョブ機能が初期化されていません")
+    if not request.csv_files:
+        raise HTTPException(status_code=400, detail="csv_files を1つ以上指定してください")
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    now = _now()
+
+    csv_paths: list[Path] = []
+    file_names: list[str] = []
+
+    for csv_input in request.csv_files:
+        safe_name = csv_input.filename.replace("/", "_").replace("\\", "_")
+
+        if csv_input.content_base64:
+            try:
+                content = base64.b64decode(csv_input.content_base64)
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{safe_name}: content_base64 のデコードに失敗しました。正しいBase64文字列を指定してください。",
+                )
+            local_path = storage_mod.save_csv_locally(_UPLOADS_DIR, job_id, safe_name, content)
+            storage_mod.upload_csv_to_s3(job_id, safe_name, content)
+
+        elif csv_input.file_path:
+            src = Path(csv_input.file_path)
+            if not src.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"指定されたファイルが見つかりません: {csv_input.file_path}",
+                )
+            local_path = _UPLOADS_DIR / f"{job_id}_{safe_name}"
+            shutil.copy2(src, local_path)
+            content = local_path.read_bytes()
+            storage_mod.upload_csv_to_s3(job_id, safe_name, content)
+        else:
+            raise HTTPException(status_code=400, detail=f"{safe_name}: ファイル内容が指定されていません")
+
+        csv_paths.append(local_path)
+        file_names.append(safe_name)
+
+    output_path = _OUTPUTS_DIR / f"{job_id}.wav"
+
+    initial_steps = _store_fns["audio_initial_steps"]()
+    job: dict = {
+        "id": job_id,
+        "jobType": "audio",
+        "csvFileNames": ",".join(file_names),
+        "notebookTitle": request.title,
+        "instructions": request.instructions,
+        "style": None,
+        "format": None,
+        "language": request.language,
+        "timeout": request.timeout,
+        "voiceName": request.voice_name,
+        "generatedScript": None,
+        "status": "pending",
+        "steps": initial_steps,
+        "currentStep": None,
+        "errorMessage": None,
+        "createdAt": now,
+        "updatedAt": now,
+        "completedAt": None,
+        "callbackUrl": request.callback_url,
+    }
+
+    await _store_fns["create"](job)
+
+    background_tasks.add_task(
+        _store_fns["run_audio_job"],
+        job_id=job_id,
+        csv_paths=csv_paths,
+        output_path=output_path,
+        title=request.title,
+        instructions=request.instructions,
+        voice_name=request.voice_name,
+        language=request.language,
+        timeout=request.timeout,
+        store_update=_store_fns["update"],
+        callback_url=request.callback_url,
+        semaphore=_store_fns["semaphore"],
+    )
+
+    return AudioJobResponse(**job)
+
+
+@router.get(
+    "/audio-jobs/{job_id}",
+    response_model=AudioJobResponse,
+    summary="音声ジョブ状態取得",
+    description=(
+        "指定した音声ジョブの現在の状態を返します。\n\n"
+        "`status` が `completed` になると `generatedScript` フィールドに生成された解説原稿テキストが入ります。\n\n"
+        "ポーリング推奨間隔: 10〜15秒"
+    ),
+)
+async def get_audio_job_v1(
+    job_id: str,
+    _api_key: str = Depends(verify_api_key),
+) -> AudioJobResponse:
+    job = await _store_fns["get"](job_id)
+    if job.get("jobType") != "audio":
+        raise HTTPException(status_code=404, detail="音声ジョブが見つかりません")
+    return AudioJobResponse(**job)
+
+
+@router.get(
+    "/audio-jobs/{job_id}/download",
+    summary="音声ダウンロード",
+    description=(
+        "完了した音声ジョブのWAVファイルをダウンロードします。\n\n"
+        "S3 が有効な場合は署名付き URL（有効期限1時間）へリダイレクトします。\n"
+        "ジョブが `completed` 状態でない場合は 400 エラーを返します。"
+    ),
+    responses={
+        200: {"content": {"audio/wav": {}}, "description": "WAV音声ファイル（ローカルモード）"},
+        302: {"description": "S3 署名付き URL へリダイレクト"},
+        400: {"description": "音声がまだ準備できていない"},
+        404: {"description": "ジョブまたは音声ファイルが見つからない"},
+    },
+)
+async def download_audio_job_v1(
+    job_id: str,
+    _api_key: str = Depends(verify_api_key),
+):
+    job = await _store_fns["get"](job_id)
+    if job.get("jobType") != "audio":
+        raise HTTPException(status_code=404, detail="音声ジョブが見つかりません")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="音声はまだ準備ができていません")
+
+    # S3 モード: 署名付き URL にリダイレクト
+    if storage_mod.is_s3_enabled():
+        url = storage_mod.generate_audio_download_url(job_id, suffix=".wav")
+        if url is None:
+            raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
+        return RedirectResponse(url=url, status_code=302)
+
+    # ローカルモード: ファイルを直接返す
+    output_path = _OUTPUTS_DIR / f"{job_id}.wav"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="音声ファイルが見つかりません")
+
+    safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
+    return FileResponse(
+        path=str(output_path),
+        media_type="audio/wav",
+        filename=f"{safe_title}.wav",
     )

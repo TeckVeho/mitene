@@ -27,6 +27,7 @@ from pydantic import BaseModel
 import database
 import storage
 from runner import run_job
+from audio_runner import run_audio_job
 from api_v1 import router as v1_router, register_store_functions
 
 logging.basicConfig(
@@ -59,11 +60,12 @@ class JobStepInfo(BaseModel):
 
 class Job(BaseModel):
     id: str
+    jobType: str = "video"  # video | audio
     csvFileNames: str
     notebookTitle: str
     instructions: str
-    style: str
-    format: str
+    style: Optional[str] = None
+    format: Optional[str] = None
     language: str
     timeout: int
     status: str  # pending | processing | completed | error
@@ -74,6 +76,8 @@ class Job(BaseModel):
     updatedAt: str
     completedAt: Optional[str] = None
     callbackUrl: Optional[str] = None
+    voiceName: Optional[str] = None
+    generatedScript: Optional[str] = None
 
 
 class JobStats(BaseModel):
@@ -108,6 +112,15 @@ def _initial_steps() -> list[dict]:
         {"id": "add_source", "label": "CSVソース追加", "status": "pending"},
         {"id": "generate_video", "label": "動画生成開始", "status": "pending"},
         {"id": "wait_completion", "label": "生成完了待機", "status": "pending"},
+        {"id": "download_ready", "label": "ダウンロード準備完了", "status": "pending"},
+    ]
+
+
+def _audio_initial_steps() -> list[dict]:
+    return [
+        {"id": "read_csv", "label": "CSV読み込み", "status": "pending"},
+        {"id": "generate_script", "label": "解説原稿生成", "status": "pending"},
+        {"id": "generate_audio", "label": "音声生成", "status": "pending"},
         {"id": "download_ready", "label": "ダウンロード準備完了", "status": "pending"},
     ]
 
@@ -168,6 +181,8 @@ async def _on_startup() -> None:
         initial_steps_fn=_initial_steps,
         run_job_fn=run_job,
         semaphore=_job_semaphore,
+        audio_initial_steps_fn=_audio_initial_steps,
+        run_audio_job_fn=run_audio_job,
         # in-memory モード専用（PostgreSQL モードでは使用しない）
         raw_store=raw_store,
         raw_lock=raw_lock,
@@ -278,8 +293,8 @@ async def get_stats():
 
 
 @app.get("/api/jobs", response_model=list[Job])
-async def get_jobs(status: Optional[str] = None):
-    return await database.store_list(status)
+async def get_jobs(status: Optional[str] = None, type: Optional[str] = None):
+    return await database.store_list(status, job_type=type)
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
@@ -366,23 +381,119 @@ async def create_job(
 async def download_job(job_id: str):
     job = await database.store_get(job_id)
     if job["status"] != "completed":
-        raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
+        raise HTTPException(status_code=400, detail="ファイルはまだ準備ができていません")
 
-    # S3 モード: 署名付き URL にリダイレクト
-    if storage.is_s3_enabled():
-        url = storage.generate_mp4_download_url(job_id)
-        if url is None:
-            raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
-        return RedirectResponse(url=url, status_code=302)
+    job_type = job.get("jobType", "video")
 
-    # ローカルモード: ファイルを直接返す
-    output_path = OUTPUTS_DIR / f"{job_id}.mp4"
-    if not output_path.exists():
-        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
+    if job_type == "audio":
+        # S3 モード: 署名付き URL にリダイレクト
+        if storage.is_s3_enabled():
+            url = storage.generate_audio_download_url(job_id, suffix=".wav")
+            if url is None:
+                raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
+            return RedirectResponse(url=url, status_code=302)
 
-    safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
-    return FileResponse(
-        path=str(output_path),
-        media_type="video/mp4",
-        filename=f"{safe_title}.mp4",
+        # ローカルモード: ファイルを直接返す
+        output_path = OUTPUTS_DIR / f"{job_id}.wav"
+        if not output_path.exists():
+            raise HTTPException(status_code=404, detail="音声ファイルが見つかりません")
+
+        safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
+        return FileResponse(
+            path=str(output_path),
+            media_type="audio/wav",
+            filename=f"{safe_title}.wav",
+        )
+    else:
+        # S3 モード: 署名付き URL にリダイレクト
+        if storage.is_s3_enabled():
+            url = storage.generate_mp4_download_url(job_id)
+            if url is None:
+                raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
+            return RedirectResponse(url=url, status_code=302)
+
+        # ローカルモード: ファイルを直接返す
+        output_path = OUTPUTS_DIR / f"{job_id}.mp4"
+        if not output_path.exists():
+            raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
+
+        safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
+        return FileResponse(
+            path=str(output_path),
+            media_type="video/mp4",
+            filename=f"{safe_title}.mp4",
+        )
+
+
+@app.post("/api/audio-jobs", response_model=Job, status_code=201)
+async def create_audio_job(
+    background_tasks: BackgroundTasks,
+    csvFiles: List[UploadFile] = File(...),
+    title: str = Form(default="CSV音声解説"),
+    instructions: str = Form(default="CSVデータの主要な傾向と示唆を分かりやすく解説してください"),
+    voiceName: str = Form(default="Kore"),
+    language: str = Form(default="ja"),
+    timeout: int = Form(default=600),
+):
+    if not csvFiles:
+        raise HTTPException(status_code=400, detail="CSVファイルを1つ以上指定してください")
+
+    import uuid
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    now = _now()
+
+    csv_paths: list[Path] = []
+    file_names: list[str] = []
+
+    for upload in csvFiles:
+        safe_name = upload.filename or "upload.csv"
+        content = await upload.read()
+
+        local_path = storage.save_csv_locally(UPLOADS_DIR, job_id, safe_name, content)
+        csv_paths.append(local_path)
+        file_names.append(safe_name)
+
+        storage.upload_csv_to_s3(job_id, safe_name, content)
+
+    output_path = OUTPUTS_DIR / f"{job_id}.wav"
+
+    job: dict = {
+        "id": job_id,
+        "jobType": "audio",
+        "csvFileNames": ",".join(file_names),
+        "notebookTitle": title,
+        "instructions": instructions,
+        "style": None,
+        "format": None,
+        "language": language,
+        "timeout": timeout,
+        "status": "pending",
+        "steps": _audio_initial_steps(),
+        "currentStep": None,
+        "errorMessage": None,
+        "createdAt": now,
+        "updatedAt": now,
+        "completedAt": None,
+        "callbackUrl": None,
+        "voiceName": voiceName,
+        "generatedScript": None,
+    }
+
+    await database.store_create(job)
+
+    background_tasks.add_task(
+        run_audio_job,
+        job_id=job_id,
+        csv_paths=csv_paths,
+        output_path=output_path,
+        title=title,
+        instructions=instructions,
+        voice_name=voiceName,
+        language=language,
+        timeout=timeout,
+        store_update=database.store_update,
+        semaphore=_job_semaphore,
     )
+
+    return job

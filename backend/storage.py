@@ -7,6 +7,7 @@ S3_BUCKET_NAME 環境変数が設定されている場合は AWS S3 を使用し
 S3 フォルダ構成:
   uploads/{job_id}/{filename}  - アップロードされた CSV ファイル
   outputs/{job_id}.mp4         - 生成済み MP4 ファイル
+  outputs/{job_id}.wav         - 生成済み WAV ファイル（音声ジョブ）
 """
 
 import logging
@@ -136,6 +137,68 @@ def generate_mp4_download_url(job_id: str, expires_in: int = 3600) -> Optional[s
         return url
     except Exception as exc:
         logger.error("署名付き URL 生成失敗: %s", exc)
+        return None
+
+
+def upload_audio_to_s3(job_id: str, local_path: Path) -> Optional[str]:
+    """
+    生成済み WAV ファイルをローカルから S3 にアップロードする。
+    アップロード後、ローカルの一時ファイルは削除する。
+    S3 が無効な場合は None を返す。
+
+    Returns:
+        S3 キー文字列（例: "outputs/job_abc123.wav"）、または None
+    """
+    if not is_s3_enabled():
+        return None
+
+    suffix = local_path.suffix or ".wav"
+    key = f"outputs/{job_id}{suffix}"
+    content_type = "audio/wav" if suffix == ".wav" else "audio/mpeg"
+    try:
+        with open(local_path, "rb") as f:
+            _get_s3_client().upload_fileobj(
+                f,
+                S3_BUCKET,
+                key,
+                ExtraArgs={"ContentType": content_type},
+            )
+        logger.info("音声ファイルを S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
+
+        try:
+            local_path.unlink(missing_ok=True)
+            logger.debug("ローカル音声一時ファイルを削除: %s", local_path)
+        except Exception as e:
+            logger.warning("ローカル音声削除失敗（無視）: %s", e)
+
+        return key
+    except Exception as exc:
+        logger.error("音声ファイル S3 アップロード失敗: %s", exc)
+        raise
+
+
+def generate_audio_download_url(job_id: str, suffix: str = ".wav", expires_in: int = 3600) -> Optional[str]:
+    """
+    音声ファイルの S3 署名付きダウンロード URL を生成する（有効期限: デフォルト1時間）。
+    S3 が無効な場合は None を返す。
+
+    Returns:
+        署名付き URL 文字列、または None
+    """
+    if not is_s3_enabled():
+        return None
+
+    key = f"outputs/{job_id}{suffix}"
+    try:
+        url = _get_s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=expires_in,
+        )
+        logger.debug("音声署名付き URL を生成: %s", url[:80])
+        return url
+    except Exception as exc:
+        logger.error("音声署名付き URL 生成失敗: %s", exc)
         return None
 
 

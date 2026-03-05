@@ -7,8 +7,9 @@ import { Progress } from "@/components/ui/progress";
 import { useJobs } from "@/hooks/use-jobs";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { VIDEO_STYLE_LABELS } from "@/lib/types";
+import type { Job } from "@/lib/types";
 import { formatDistanceToNow } from "@/lib/date-utils";
-import { ArrowRight, FileSpreadsheet, Video } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, Video, Mic } from "lucide-react";
 
 export function RecentJobs() {
   const { data: jobs, isLoading } = useJobs();
@@ -37,7 +38,7 @@ export function RecentJobs() {
             <div className="flex items-center justify-center size-12 rounded-full bg-muted mb-3">
               <Video className="size-5 text-muted-foreground" />
             </div>
-            <p className="text-sm text-muted-foreground">まだ動画が生成されていません</p>
+            <p className="text-sm text-muted-foreground">まだジョブが生成されていません</p>
             <Button asChild size="sm" className="mt-4">
               <Link href="/generate">最初の動画を生成する</Link>
             </Button>
@@ -51,7 +52,11 @@ export function RecentJobs() {
                   className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                 >
                   <div className="flex items-center justify-center size-8 rounded-md bg-muted shrink-0">
-                    <FileSpreadsheet className="size-4 text-muted-foreground" />
+                    {job.jobType === "audio" ? (
+                      <Mic className="size-4 text-muted-foreground" />
+                    ) : (
+                      <FileSpreadsheet className="size-4 text-muted-foreground" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -60,7 +65,7 @@ export function RecentJobs() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {VIDEO_STYLE_LABELS[job.style].label}
+                        {getJobSubtitle(job)}
                       </span>
                       <span className="text-muted-foreground text-xs">·</span>
                       <span className="text-xs text-muted-foreground">
@@ -68,7 +73,7 @@ export function RecentJobs() {
                       </span>
                     </div>
                     {job.status === "processing" && (
-                      <Progress className="h-1 mt-1.5" value={getProgress(job.currentStep)} />
+                      <Progress className="h-1 mt-1.5" value={getProgress(job)} />
                     )}
                   </div>
                   <ArrowRight className="size-3.5 text-muted-foreground shrink-0" />
@@ -82,9 +87,18 @@ export function RecentJobs() {
   );
 }
 
-function getProgress(step?: string): number {
-  const steps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
-  const idx = steps.indexOf(step ?? "");
+function getJobSubtitle(job: Job): string {
+  if (job.jobType === "audio") {
+    return `音声 · ${job.voiceName ?? "—"}`;
+  }
+  return job.style ? VIDEO_STYLE_LABELS[job.style]?.label ?? "動画" : "動画";
+}
+
+function getProgress(job: Job): number {
+  const videoSteps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
+  const audioSteps = ["read_csv", "generate_script", "generate_audio", "download_ready"];
+  const steps = job.jobType === "audio" ? audioSteps : videoSteps;
+  const idx = steps.indexOf(job.currentStep ?? "");
   if (idx === -1) return 0;
   return ((idx + 1) / steps.length) * 100;
 }

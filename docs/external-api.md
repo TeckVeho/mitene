@@ -10,10 +10,11 @@
 2. [実装済みファイル一覧](#実装済みファイル一覧)
 3. [セットアップ](#セットアップ)
 4. [認証](#認証)
-5. [エンドポイント仕様](#エンドポイント仕様)
+5. [エンドポイント仕様（動画）](#エンドポイント仕様)
 6. [Webhook通知](#webhook通知)
 7. [利用例（cURL）](#利用例curl)
-8. [既存フロントエンドAPIとの共存](#既存フロントエンドapiとの共存)
+8. [音声解説API](#音声解説api)
+9. [既存フロントエンドAPIとの共存](#既存フロントエンドapiとの共存)
 
 ---
 
@@ -401,6 +402,229 @@ else:
 
 ---
 
+## 音声解説API
+
+CSVから音声解説（WAVファイル）を生成する外部APIです。Google NotebookLM の代わりに **Gemini API** を使用するため、`GEMINI_API_KEY` 環境変数が必要です。
+
+```
+外部システム
+  │
+  │  POST /api/v1/audio-jobs  (X-API-Key + JSON)
+  ▼
+FastAPI Backend  ─── バックグラウンド処理 ───►  Gemini LLM（解説原稿生成）
+  │                                               │
+  │  GET /api/v1/audio-jobs/{id}  (ポーリング)    │ Gemini TTS（音声生成）
+  ◄──────────────────────────────────────         │
+  │                                               │
+  │◄──── POST callback_url (Webhook通知) ─────────┘
+  │
+  │  GET /api/v1/audio-jobs/{id}/download
+  ▼
+WAVダウンロード
+```
+
+**処理ステップ**
+
+| ステップID | ラベル | 内容 |
+|---|---|---|
+| `read_csv` | CSV読み込み | アップロードされたCSVを読み込む |
+| `generate_script` | 解説原稿生成 | Gemini LLM（gemini-2.5-flash）で解説原稿テキストを生成 |
+| `generate_audio` | 音声生成 | Gemini TTS（gemini-2.5-flash-preview-tts）でWAV音声を生成 |
+| `download_ready` | ダウンロード準備完了 | WAVファイルを保存 |
+
+### POST `/api/v1/audio-jobs` — 音声ジョブ作成
+
+**リクエストヘッダー**
+
+```
+Content-Type: application/json
+X-API-Key: <your-api-key>
+```
+
+**リクエストボディ**
+
+```json
+{
+  "title": "売上解説レポート",
+  "instructions": "月次売上の傾向と前月比較を分かりやすく解説してください",
+  "voice_name": "Kore",
+  "language": "ja",
+  "timeout": 600,
+  "callback_url": "https://your-system/webhooks/notevideo-audio",
+  "csv_files": [
+    {
+      "filename": "sales.csv",
+      "content_base64": "<Base64エンコードされたCSVの内容>"
+    }
+  ]
+}
+```
+
+**パラメータ詳細**
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `title` | string | `"CSV音声解説"` | 音声解説のタイトル |
+| `instructions` | string | `"CSVデータの...解説..."` | 解説内容に関する指示 |
+| `voice_name` | string | `"Kore"` | Gemini TTS のボイス名（下表参照） |
+| `language` | string | `"ja"` | 生成言語（`ja` / `en` 等） |
+| `timeout` | integer | `600` | タイムアウト秒数 |
+| `callback_url` | string | `null` | 完了・エラー時のWebhook通知先URL（任意） |
+| `csv_files` | array | 必須 | CSVファイルの配列（1つ以上） |
+
+**利用可能なボイス名**
+
+| 値 | 特徴 |
+|---|---|
+| `Kore` | 落ち着いたクリアな女性声（デフォルト） |
+| `Charon` | 低めで重厚な男性声 |
+| `Fenrir` | 力強い男性声 |
+| `Aoede` | 明るく柔らかい女性声 |
+| `Puck` | 軽快でエネルギッシュな声 |
+
+**レスポンス（201 Created）**
+
+```json
+{
+  "id": "job_a1b2c3d4e5f6",
+  "jobType": "audio",
+  "csvFileNames": "sales.csv",
+  "notebookTitle": "売上解説レポート",
+  "instructions": "月次売上の傾向と前月比較を分かりやすく解説してください",
+  "language": "ja",
+  "timeout": 600,
+  "voiceName": "Kore",
+  "generatedScript": null,
+  "status": "pending",
+  "steps": [
+    {"id": "read_csv",         "label": "CSV読み込み",       "status": "pending"},
+    {"id": "generate_script",  "label": "解説原稿生成",      "status": "pending"},
+    {"id": "generate_audio",   "label": "音声生成",          "status": "pending"},
+    {"id": "download_ready",   "label": "ダウンロード準備完了", "status": "pending"}
+  ],
+  "currentStep": null,
+  "errorMessage": null,
+  "createdAt": "2026-03-05T10:00:00.000000+00:00",
+  "updatedAt": "2026-03-05T10:00:00.000000+00:00",
+  "completedAt": null,
+  "callbackUrl": "https://your-system/webhooks/notevideo-audio"
+}
+```
+
+---
+
+### GET `/api/v1/audio-jobs/{job_id}` — 音声ジョブ状態取得
+
+ポーリングで進捗を確認します。完了後は `generatedScript` に生成された解説原稿テキストが入ります。
+
+推奨ポーリング間隔: **10〜15秒**（音声生成は通常1〜3分で完了）
+
+---
+
+### GET `/api/v1/audio-jobs/{job_id}/download` — 音声ダウンロード
+
+ジョブが `completed` 状態のときのみダウンロード可能です。
+
+**レスポンス**
+
+- `200 OK` — `Content-Type: audio/wav` でWAVファイルを返す
+- `302 Found` — S3 が有効な場合は署名付きURL（有効期限1時間）へリダイレクト
+- `400 Bad Request` — ジョブがまだ完了していない
+- `404 Not Found` — ジョブIDが存在しない、またはファイルが見つからない
+
+---
+
+### 利用例（cURL）
+
+```bash
+# ステップ1: CSVをBase64エンコード
+CSV_BASE64=$(base64 -i ./sales.csv)
+
+# ステップ2: 音声ジョブ作成
+RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/audio-jobs \
+  -H "X-API-Key: your_secret_key_here" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"title\": \"売上解説レポート\",
+    \"instructions\": \"月次売上の傾向を解説してください\",
+    \"voice_name\": \"Kore\",
+    \"language\": \"ja\",
+    \"callback_url\": \"https://your-system/webhooks/notevideo-audio\",
+    \"csv_files\": [{
+      \"filename\": \"sales.csv\",
+      \"content_base64\": \"${CSV_BASE64}\"
+    }]
+  }")
+
+JOB_ID=$(echo $RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
+echo "ジョブID: $JOB_ID"
+
+# ステップ3: ステータスをポーリング
+while true; do
+  STATUS=$(curl -s http://localhost:8000/api/v1/audio-jobs/$JOB_ID \
+    -H "X-API-Key: your_secret_key_here" \
+    | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")
+  echo "ステータス: $STATUS"
+  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "error" ]; then
+    break
+  fi
+  sleep 15
+done
+
+# ステップ4: WAVをダウンロード
+curl -o output.wav http://localhost:8000/api/v1/audio-jobs/$JOB_ID/download \
+  -H "X-API-Key: your_secret_key_here"
+echo "ダウンロード完了: output.wav"
+```
+
+### Python利用例
+
+```python
+import base64
+import time
+import httpx
+
+BASE_URL = "http://localhost:8000/api/v1"
+HEADERS = {"X-API-Key": "your_secret_key_here"}
+
+# CSVをBase64エンコード
+with open("sales.csv", "rb") as f:
+    csv_b64 = base64.b64encode(f.read()).decode()
+
+# 音声ジョブ作成
+resp = httpx.post(f"{BASE_URL}/audio-jobs", headers=HEADERS, json={
+    "title": "売上解説レポート",
+    "instructions": "月次売上の傾向を解説してください",
+    "voice_name": "Kore",
+    "language": "ja",
+    "csv_files": [{"filename": "sales.csv", "content_base64": csv_b64}],
+    "callback_url": "https://your-system/webhook",
+})
+resp.raise_for_status()
+job_id = resp.json()["id"]
+print(f"ジョブ作成: {job_id}")
+
+# ポーリングで完了を待つ
+while True:
+    job = httpx.get(f"{BASE_URL}/audio-jobs/{job_id}", headers=HEADERS).json()
+    print(f"ステータス: {job['status']} / ステップ: {job['currentStep']}")
+    if job["status"] in ("completed", "error"):
+        break
+    time.sleep(15)
+
+# WAVダウンロード & 生成原稿表示
+if job["status"] == "completed":
+    audio = httpx.get(f"{BASE_URL}/audio-jobs/{job_id}/download", headers=HEADERS)
+    with open("output.wav", "wb") as f:
+        f.write(audio.content)
+    print("音声保存完了: output.wav")
+    print(f"生成原稿:\n{job['generatedScript']}")
+else:
+    print(f"エラー: {job['errorMessage']}")
+```
+
+---
+
 ## 既存フロントエンドAPIとの共存
 
 外部API（`/api/v1/`）は既存のフロントエンド用API（`/api/`）と**完全に独立**しています。
@@ -410,6 +634,8 @@ else:
 | 認証 | なし | `X-API-Key` ヘッダー必須 |
 | CSVの渡し方 | `multipart/form-data` | JSON（Base64 or サーバーパス） |
 | Webhook | なし | `callback_url` で指定可 |
+| 動画生成 | `POST /api/jobs` | `POST /api/v1/jobs` |
+| 音声生成 | `POST /api/audio-jobs` | `POST /api/v1/audio-jobs` |
 | 対象 | ブラウザUI | 外部システム・スクリプト |
 
 既存のフロントエンド動作に影響はありません。ジョブストアは共通のため、フロントエンドUI上でも外部APIから作成したジョブを確認できます。
