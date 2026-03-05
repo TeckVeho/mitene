@@ -86,6 +86,7 @@ export interface CreateAudioJobPayload {
   voiceName: string;
   language: string;
   timeout: number;
+  stylePrompt: string;
 }
 
 export const VIDEO_STYLE_LABELS: Record<VideoStyle, { label: string; description: string }> = {
@@ -115,6 +116,12 @@ export const AUDIO_STEP_LABELS: Record<AudioStep, string> = {
   download_ready: "ダウンロード準備完了",
 };
 
+export interface ApiInfo {
+  base_url: string;
+  api_keys: string[];
+  has_keys: boolean;
+}
+
 export interface VoiceOption {
   value: string;
   label: string;
@@ -123,11 +130,17 @@ export interface VoiceOption {
 
 export const VOICE_OPTIONS: VoiceOption[] = [
   { value: "Kore", label: "Kore", description: "落ち着いた女性の声" },
+  { value: "Aoede", label: "Aoede", description: "明るく柔らかい女性の声" },
+  { value: "Leda", label: "Leda", description: "穏やかな女性の声" },
+  { value: "Zephyr", label: "Zephyr", description: "軽やかな明るい女性の声" },
+  { value: "Autonoe", label: "Autonoe", description: "やわらかい女性の声" },
+  { value: "Callirrhoe", label: "Callirrhoe", description: "クリアな女性の声" },
+  { value: "Despina", label: "Despina", description: "はっきりとした女性の声" },
+  { value: "Erinome", label: "Erinome", description: "落ち着いた滑らかな女性の声" },
+  { value: "Laomedeia", label: "Laomedeia", description: "明瞭で聞きやすい女性の声" },
   { value: "Puck", label: "Puck", description: "活発で明るい男性の声" },
   { value: "Charon", label: "Charon", description: "深みのある落ち着いた男性の声" },
-  { value: "Aoede", label: "Aoede", description: "明るく柔らかい女性の声" },
   { value: "Fenrir", label: "Fenrir", description: "力強い男性の声" },
-  { value: "Leda", label: "Leda", description: "穏やかな女性の声" },
   { value: "Orus", label: "Orus", description: "クリアな男性の声" },
-  { value: "Zephyr", label: "Zephyr", description: "軽やかな明るい声" },
+  { value: "Umbriel", label: "Umbriel", description: "重厚で渋い男性の声" },
 ];

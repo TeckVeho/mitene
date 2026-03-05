@@ -1,4 +1,4 @@
-import type { AuthStatus, CreateAudioJobPayload, CreateJobPayload, Job, JobStats } from "./types";
+import type { ApiInfo, AuthStatus, CreateAudioJobPayload, CreateJobPayload, Job, JobStats } from "./types";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
 
@@ -240,6 +240,7 @@ async function realCreateAudioJob(payload: CreateAudioJobPayload): Promise<Job> 
   formData.append("voiceName", payload.voiceName);
   formData.append("language", payload.language);
   formData.append("timeout", String(payload.timeout));
+  formData.append("stylePrompt", payload.stylePrompt);
 
   const res = await fetch(`${BASE_URL}/audio-jobs`, { method: "POST", body: formData });
   if (!res.ok) throw new Error("音声ジョブの作成に失敗しました");
@@ -268,6 +269,21 @@ async function mockTriggerLogin(): Promise<{ message: string }> {
   return { message: "モック: ログインブラウザを開きました。" };
 }
 
+async function mockGetApiInfo(): Promise<ApiInfo> {
+  await mockDelay();
+  return {
+    base_url: "http://localhost:8000/api/v1",
+    api_keys: ["local-te***key"],
+    has_keys: true,
+  };
+}
+
+async function realGetApiInfo(): Promise<ApiInfo> {
+  const res = await fetch(`${BASE_URL}/settings/api-info`);
+  if (!res.ok) throw new Error("API情報の取得に失敗しました");
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Exported API client
 // ---------------------------------------------------------------------------
@@ -280,6 +296,8 @@ export const api = {
   createAudioJob: USE_MOCK ? mockCreateAudioJob : realCreateAudioJob,
   getAuthStatus: USE_MOCK ? mockGetAuthStatus : realGetAuthStatus,
   triggerLogin: USE_MOCK ? mockTriggerLogin : realTriggerLogin,
+
+  getApiInfo: USE_MOCK ? mockGetApiInfo : realGetApiInfo,
 
   getDownloadUrl(id: string): string {
     return `${BASE_URL}/jobs/${id}/download`;

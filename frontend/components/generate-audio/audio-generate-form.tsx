@@ -56,6 +56,7 @@ export function AudioGenerateForm() {
   const [csvError, setCsvError] = useState<string>("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [ttsConfig, setTtsConfig] = useState(getPresetById(DEFAULT_PRESET_ID)?.ttsConfig ?? { stylePrompt: "" });
   const { mutate: generate, isPending } = useGenerateAudio();
 
   const defaultInstructions = getPresetById(DEFAULT_PRESET_ID)?.text ?? "";
@@ -82,6 +83,7 @@ export function AudioGenerateForm() {
     const preset = getPresetById(presetId);
     if (preset && presetId !== "custom") {
       setValue("instructions", preset.text, { shouldValidate: true });
+      setTtsConfig(preset.ttsConfig);
     }
   };
 
@@ -106,6 +108,7 @@ export function AudioGenerateForm() {
       voiceName: values.voiceName,
       language: values.language,
       timeout: values.timeout,
+      stylePrompt: ttsConfig.stylePrompt,
     });
   };
 

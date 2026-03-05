@@ -90,6 +90,7 @@ async def run_audio_job(
     language: str,
     timeout: int,
     store_update: StoreUpdateFn,
+    style_prompt: str = "",
     callback_url: Optional[str] = None,
     semaphore: asyncio.Semaphore | None = None,
 ) -> None:
@@ -189,6 +190,9 @@ async def run_audio_job(
             lambda: client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    top_p=1.0,
+                ),
             ),
         )
         script = script_response.text
@@ -204,21 +208,26 @@ async def run_audio_job(
             message=f"Gemini TTS で音声を生成中... (ボイス: {voice_name})"
         )
 
+        tts_input = f"{style_prompt} {script}".strip() if style_prompt else script
+
+        def _build_tts_config() -> genai_types.GenerateContentConfig:
+            return genai_types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=genai_types.SpeechConfig(
+                    voice_config=genai_types.VoiceConfig(
+                        prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
+                            voice_name=voice_name,
+                        )
+                    )
+                ),
+            )
+
         tts_response = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: client.models.generate_content(
                 model="gemini-2.5-flash-preview-tts",
-                contents=script,
-                config=genai_types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=genai_types.SpeechConfig(
-                        voice_config=genai_types.VoiceConfig(
-                            prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
-                                voice_name=voice_name,
-                            )
-                        )
-                    ),
-                ),
+                contents=tts_input,
+                config=_build_tts_config(),
             ),
         )
 

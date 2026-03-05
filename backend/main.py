@@ -231,6 +231,37 @@ async def get_auth_status():
     return AuthStatus(status=_check_auth_from_storage())
 
 
+# ---------------------------------------------------------------------------
+# Settings routes
+# ---------------------------------------------------------------------------
+
+
+class ApiInfoResponse(BaseModel):
+    base_url: str
+    api_keys: list[str]
+    has_keys: bool
+
+
+def _mask_key(key: str) -> str:
+    if len(key) <= 10:
+        return key[:2] + "***" if len(key) > 2 else "***"
+    return key[:7] + "***" + key[-3:]
+
+
+@app.get("/api/settings/api-info", response_model=ApiInfoResponse)
+async def get_api_info():
+    """外部連携APIの設定情報を返す（APIキーはマスキング済み）"""
+    raw = os.environ.get("NOTEVIDEO_API_KEYS", "")
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
+    masked = [_mask_key(k) for k in keys]
+    host = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    return ApiInfoResponse(
+        base_url=f"{host}/api/v1",
+        api_keys=masked,
+        has_keys=bool(keys),
+    )
+
+
 def _find_notebooklm() -> str:
     cmd = shutil.which("notebooklm")
     if cmd:
@@ -434,6 +465,7 @@ async def create_audio_job(
     voiceName: str = Form(default="Kore"),
     language: str = Form(default="ja"),
     timeout: int = Form(default=600),
+    stylePrompt: str = Form(default=""),
 ):
     if not csvFiles:
         raise HTTPException(status_code=400, detail="CSVファイルを1つ以上指定してください")
@@ -492,6 +524,7 @@ async def create_audio_job(
         voice_name=voiceName,
         language=language,
         timeout=timeout,
+        style_prompt=stylePrompt,
         store_update=database.store_update,
         semaphore=_job_semaphore,
     )

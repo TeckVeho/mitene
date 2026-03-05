@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { LayoutDashboard, Video, History, ChevronLeft, ChevronRight, FileVideo, Mic } from "lucide-react";
+import { LayoutDashboard, Video, History, ChevronLeft, ChevronRight, FileVideo, Mic, Settings } from "lucide-react";
 import { SidebarItem } from "./sidebar-item";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -12,6 +12,10 @@ const NAV_ITEMS = [
   { href: "/generate", icon: Video, label: "新規動画生成" },
   { href: "/generate-audio", icon: Mic, label: "新規音声生成" },
   { href: "/jobs", icon: History, label: "生成履歴" },
+];
+
+const BOTTOM_NAV_ITEMS = [
+  { href: "/settings", icon: Settings, label: "設定" },
 ];
 
 export function Sidebar() {
@@ -57,12 +61,29 @@ export function Sidebar() {
             ))}
       </nav>
 
-      {/* Footer */}
-      {!collapsed && (
-        <div className="px-3 py-3 border-t border-sidebar-border">
-          <p className="text-[11px] text-muted-foreground">NoteVideo v0.1.0</p>
-        </div>
-      )}
+      {/* Bottom navigation (Settings etc.) */}
+      <div className="px-2 py-2 border-t border-sidebar-border space-y-0.5">
+        {collapsed
+          ? BOTTOM_NAV_ITEMS.map((item) => (
+              <Tooltip key={item.href} delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <Link
+                    href={item.href}
+                    className="flex items-center justify-center size-9 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors mx-auto"
+                  >
+                    <item.icon className="size-4" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">{item.label}</TooltipContent>
+              </Tooltip>
+            ))
+          : BOTTOM_NAV_ITEMS.map((item) => (
+              <SidebarItem key={item.href} {...item} />
+            ))}
+        {!collapsed && (
+          <p className="text-[11px] text-muted-foreground px-1 pt-1">NoteVideo v0.1.0</p>
+        )}
+      </div>
 
       {/* Collapse toggle */}
       <button

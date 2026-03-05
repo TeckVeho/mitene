@@ -11,7 +11,9 @@ import type { AuthStatusValue } from "@/lib/types";
 const BREADCRUMB_MAP: Record<string, string> = {
   "": "ダッシュボード",
   generate: "新規動画生成",
+  "generate-audio": "新規音声生成",
   jobs: "生成履歴",
+  settings: "設定",
 };
 
 function getBreadcrumbs(pathname: string) {
