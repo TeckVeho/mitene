@@ -1,0 +1,25 @@
+# NoteVideo フロントエンド systemd サービス定義
+# /etc/systemd/system/notevideo-frontend.service に配置する
+#
+# 登録・起動手順:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable notevideo-frontend
+#   sudo systemctl start notevideo-frontend
+
+[Unit]
+Description=NoteVideo Frontend (Next.js)
+After=network.target notevideo-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/notevideo/frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/bin/node /opt/notevideo/frontend/.next/standalone/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
