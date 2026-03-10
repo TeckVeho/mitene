@@ -26,12 +26,12 @@ module.exports = {
       name: "notevideo-backend",
       cwd: __dirname,
       // Chạy uvicorn qua python, đọc host/port từ env
-      script: "uvicorn",
+      script: ".venv/bin/uvicorn",
       args:
         "main:app --host 0.0.0.0 --port " +
         (process.env.PORT || "8000") +
         " --workers 2",
-      interpreter: process.env.PYTHON_INTERPRETER || "python",
+      interpreter: "none",
       env: {
         // chuyển toàn bộ env backend vào process
         ...process.env,
