@@ -1,0 +1,92 @@
+name: Deploy SP App
+on:
+  push:
+    branches:
+      - develop
+      - production
+  workflow_dispatch:
+jobs:
+  # =========================
+  # DEPLOY BACKEND (FastAPI)
+  # =========================
+  deploy-backend:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup SSH
+        uses: ./.github/actions/setup-ssh
+        with:
+          ssh_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Create virtualenv & install dependencies (CI only)
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      # .env backend giữ trên server, không sync từ CI
+      - name: Deploy Backend to EC2
+        env:
+          HOST: ${{ secrets.SSH_HOST }}
+          USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH_BE }}
+        run: |
+          ssh $USER@$HOST "mkdir -p $DEPLOY_PATH"
+          rsync -rzu --delete \
+            --exclude='.env' \
+            ./ $USER@$HOST:$DEPLOY_PATH
+          ssh $USER@$HOST "
+            cd $DEPLOY_PATH &&
+            chmod +x .venv/bin/activate || true &&
+            pm2 reload ecosystem.config.js || \
+            pm2 start ecosystem.config.js 
+          "
+  # =========================
+  # DEPLOY FRONTEND (Next.js)
+  # =========================
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    defaults:
+      run:
+        working-directory: frontend
+        
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup SSH
+        uses: ./.github/actions/setup-ssh
+        with:
+          ssh_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ vars.NODE_VERSION }}
+      
+      - name: Install dependencies & build (CI only)
+        run: |
+          npm ci
+          npm run build
+      - name: Deploy Frontend to EC2
+        env:
+          HOST: ${{ secrets.SSH_HOST }}
+          USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH_FE }}
+        run: |
+          ssh $USER@$HOST "mkdir -p $DEPLOY_PATH"
+          rsync -rzu --delete \
+            --exclude='.env' \
+            ./ $USER@$HOST:$DEPLOY_PATH
+          ssh $USER@$HOST "
+            cd $DEPLOY_PATH &&
+            pm2 reload ecosystem.config.js || \
+            pm2 start ecosystem.config.js
+          "
