@@ -15,6 +15,10 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path as _Path
+
+from dotenv import load_dotenv
+load_dotenv(_Path(__file__).parent / ".env")
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
