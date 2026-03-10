@@ -1,0 +1,20 @@
+name: Setup SSH
+description: Setup SSH agent and known hosts
+
+inputs:
+  ssh_key:
+    required: true
+  host:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ inputs.ssh_key }}
+
+    - shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ inputs.host }} 2>/dev/null >> ~/.ssh/known_hosts
