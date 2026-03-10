@@ -31,8 +31,7 @@ backend/outputs/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
-frontend/.env.local
-frontend/.env.production.local
+frontend/.env
 
 # NotebookLM session
 .notebooklm/
