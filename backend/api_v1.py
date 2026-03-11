@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, Response
 from pydantic import BaseModel, field_validator
 
 from auth import verify_api_key
@@ -509,12 +509,18 @@ async def download_audio_job_v1(
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="音声はまだ準備ができていません")
 
-    # S3 モード: 署名付き URL にリダイレクト
+    # S3 モード: S3 からバイト列を取得して直接返す
     if storage_mod.is_s3_enabled():
-        url = storage_mod.generate_audio_download_url(job_id, suffix=".wav")
-        if url is None:
-            raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
-        return RedirectResponse(url=url, status_code=302)
+        audio_bytes = storage_mod.download_audio_from_s3(job_id, suffix=".wav")
+        if audio_bytes is None:
+            raise HTTPException(status_code=500, detail="音声ファイルの取得に失敗しました")
+
+        safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'attachment; filename="{safe_title}.wav"'},
+        )
 
     # ローカルモード: ファイルを直接返す
     output_path = _OUTPUTS_DIR / f"{job_id}.wav"
