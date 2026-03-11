@@ -202,6 +202,32 @@ def generate_audio_download_url(job_id: str, suffix: str = ".wav", expires_in: i
         return None
 
 
+def download_audio_from_s3(job_id: str, suffix: str = ".wav") -> Optional[bytes]:
+    """
+    S3 から音声ファイルのバイト列をダウンロードして返す。
+    S3 が無効な場合や失敗した場合は None を返す。
+
+    Returns:
+        音声ファイルのバイト列、または None
+    """
+    if not is_s3_enabled():
+        return None
+
+    key = f"outputs/{job_id}{suffix}"
+    try:
+        obj = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=key)
+        body = obj.get("Body")
+        if body is None:
+            logger.error("音声ファイルオブジェクトの Body が空です: s3://%s/%s", S3_BUCKET, key)
+            return None
+        data = body.read()
+        logger.debug("音声ファイルを S3 からダウンロード: s3://%s/%s (size=%d)", S3_BUCKET, key, len(data))
+        return data
+    except Exception as exc:
+        logger.error("音声ファイル S3 ダウンロード失敗: %s", exc)
+        return None
+
+
 def cleanup_local_csv(csv_paths: list[Path]) -> None:
     """ジョブ完了後、ローカルの一時 CSV ファイルを削除する"""
     for path in csv_paths:
