@@ -38,6 +38,7 @@ jobs:
           ssh $USER@$HOST "mkdir -p $DEPLOY_PATH"
           rsync -rzu --delete \
             --exclude='.env' \
+            --exclude='.venv' \
             ./ $USER@$HOST:$DEPLOY_PATH
           ssh $USER@$HOST "
             cd $DEPLOY_PATH &&
@@ -68,7 +69,10 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: ${{ vars.NODE_VERSION }}
-      
+
+      - name: Create .env file
+        run: echo '${{ secrets.ENV_FILE_FE }}' > .env
+
       - name: Install dependencies & build (CI only)
         run: |
           npm ci
