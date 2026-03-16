@@ -11,10 +11,10 @@ export function useJobStats() {
   });
 }
 
-export function useJobs(status?: string, type?: string) {
+export function useJobs(status?: string) {
   return useQuery({
-    queryKey: ["jobs", status ?? "all", type ?? "all"],
-    queryFn: () => api.getJobs(status, type),
+    queryKey: ["jobs", status ?? "all"],
+    queryFn: () => api.getJobs(status),
     refetchInterval: 10000,
   });
 }

@@ -1,9 +1,9 @@
 """
-NoteVideo バックエンド API
-generate_video_from_csv.py のロジックをジョブキュー方式で提供するFastAPIアプリ
+E-learning バックエンド API
+社内Wikiの .md ファイルを NotebookLM で動画化し、エンジニアが視聴できるシステム
 
 ストレージ:
-  - DATABASE_URL 環境変数が設定されている場合: PostgreSQL（RDS）
+  - DATABASE_URL 環境変数が設定されている場合: MySQL（RDS）
   - 未設定の場合: インメモリ（開発用）
   - S3_BUCKET_NAME 環境変数が設定されている場合: AWS S3 にファイル保存
   - 未設定の場合: ローカルファイルシステム（開発用）
@@ -23,15 +23,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Cookie, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 import database
 import storage
 from runner import run_job
-from audio_runner import run_audio_job
 from api_v1 import router as v1_router, register_store_functions
 
 logging.basicConfig(
@@ -58,13 +57,13 @@ OUTPUTS_DIR.mkdir(exist_ok=True)
 class JobStepInfo(BaseModel):
     id: str
     label: str
-    status: str  # pending | in_progress | completed | error
+    status: str
     message: Optional[str] = None
 
 
 class Job(BaseModel):
     id: str
-    jobType: str = "video"  # video | audio
+    jobType: str = "video"
     csvFileNames: str
     notebookTitle: str
     instructions: str
@@ -72,7 +71,7 @@ class Job(BaseModel):
     format: Optional[str] = None
     language: str
     timeout: int
-    status: str  # pending | processing | completed | error
+    status: str
     steps: list[JobStepInfo]
     currentStep: Optional[str] = None
     errorMessage: Optional[str] = None
@@ -80,8 +79,6 @@ class Job(BaseModel):
     updatedAt: str
     completedAt: Optional[str] = None
     callbackUrl: Optional[str] = None
-    voiceName: Optional[str] = None
-    generatedScript: Optional[str] = None
 
 
 class JobStats(BaseModel):
@@ -92,11 +89,91 @@ class JobStats(BaseModel):
 
 
 class AuthStatus(BaseModel):
-    status: str  # authenticated | not_logged_in | session_expired
+    status: str
 
 
 class LoginResponse(BaseModel):
     message: str
+
+
+class VideoResponse(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    thumbnailUrl: Optional[str] = None
+    durationSec: Optional[int] = None
+    style: Optional[str] = None
+    status: str
+    publishedAt: Optional[str] = None
+    createdAt: str
+    updatedAt: str
+    jobId: Optional[str] = None
+    articleId: Optional[str] = None
+    categoryId: Optional[str] = None
+    categoryName: Optional[str] = None
+    categorySlug: Optional[str] = None
+    watched: Optional[bool] = None
+    watchLater: Optional[bool] = None
+    liked: Optional[bool] = None
+    wikiUrl: Optional[str] = None
+    viewerCount: int = 0
+    viewCount: int = 0
+
+
+class CategoryResponse(BaseModel):
+    id: str
+    name: str
+    slug: str
+    description: Optional[str] = None
+    sortOrder: int = 0
+    videoCount: int = 0
+
+
+class UserLoginRequest(BaseModel):
+    email: str
+    displayName: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    displayName: str
+    createdAt: str
+
+
+class WatchRequest(BaseModel):
+    completed: bool = True
+
+
+class WatchHistoryItem(BaseModel):
+    id: str
+    userId: str
+    videoId: str
+    videoTitle: Optional[str] = None
+    videoStatus: Optional[str] = None
+    categoryName: Optional[str] = None
+    categorySlug: Optional[str] = None
+    completed: bool
+    watchedAt: str
+
+
+class ApiInfoResponse(BaseModel):
+    base_url: str
+    api_keys: list[str]
+    has_keys: bool
+
+
+class ArticleResponse(BaseModel):
+    id: str
+    title: str
+    gitPath: str
+    gitHash: Optional[str] = None
+    categoryId: Optional[str] = None
+    categoryName: Optional[str] = None
+    latestVideoId: Optional[str] = None
+    latestVideoStatus: Optional[str] = None
+    createdAt: str
+    updatedAt: str
 
 
 # ---------------------------------------------------------------------------
@@ -113,18 +190,9 @@ def _now() -> str:
 def _initial_steps() -> list[dict]:
     return [
         {"id": "create_notebook", "label": "ノートブック作成", "status": "pending"},
-        {"id": "add_source", "label": "CSVソース追加", "status": "pending"},
+        {"id": "add_source", "label": "ドキュメント追加", "status": "pending"},
         {"id": "generate_video", "label": "動画生成開始", "status": "pending"},
         {"id": "wait_completion", "label": "生成完了待機", "status": "pending"},
-        {"id": "download_ready", "label": "ダウンロード準備完了", "status": "pending"},
-    ]
-
-
-def _audio_initial_steps() -> list[dict]:
-    return [
-        {"id": "read_csv", "label": "CSV読み込み", "status": "pending"},
-        {"id": "generate_script", "label": "解説原稿生成", "status": "pending"},
-        {"id": "generate_audio", "label": "音声生成", "status": "pending"},
         {"id": "download_ready", "label": "ダウンロード準備完了", "status": "pending"},
     ]
 
@@ -134,15 +202,13 @@ def _audio_initial_steps() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="NoteVideo API",
-    version="0.3.0",
+    title="E-learning API",
+    version="1.0.0",
     description=(
-        "CSV→AI解説動画生成サービス NoteVideo のバックエンドAPI。\n\n"
+        "社内エンジニア向けE-learningシステムのバックエンドAPI。\n\n"
+        "社内WikiのMarkdownファイルをNotebookLMでAI動画に変換し配信します。\n\n"
         "## 認証\n"
-        "外部API (`/api/v1/`) は `X-API-Key` ヘッダーによるAPIキー認証が必要です。\n"
-        "サーバーの環境変数 `NOTEVIDEO_API_KEYS` にカンマ区切りでキーを設定してください。\n\n"
-        "## Webhook\n"
-        "ジョブ作成時に `callback_url` を指定すると、完了・エラー時にPOSTで通知します。\n\n"
+        "外部API (`/api/v1/`) は `X-API-Key` ヘッダーによるAPIキー認証が必要です。\n\n"
         "## エンドポイント\n"
         "- `/api/` - フロントエンド用（認証不要）\n"
         "- `/api/v1/` - 外部API用（APIキー認証あり）"
@@ -171,12 +237,8 @@ app.include_router(v1_router)
 
 @app.on_event("startup")
 async def _on_startup() -> None:
-    """起動時: DB初期化 & v1ルーターにストア関数を登録する"""
     await database.init_db()
-
-    # in-memory モード時は _store / lock を直接渡す（後方互換）
     raw_store, raw_lock = database.get_raw_store()
-
     register_store_functions(
         store_create_fn=database.store_create,
         store_get_fn=database.store_get,
@@ -185,9 +247,6 @@ async def _on_startup() -> None:
         initial_steps_fn=_initial_steps,
         run_job_fn=run_job,
         semaphore=_job_semaphore,
-        audio_initial_steps_fn=_audio_initial_steps,
-        run_audio_job_fn=run_audio_job,
-        # in-memory モード専用（PostgreSQL モードでは使用しない）
         raw_store=raw_store,
         raw_lock=raw_lock,
     )
@@ -199,7 +258,7 @@ async def _on_shutdown() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auth routes
+# Auth routes (NotebookLM)
 # ---------------------------------------------------------------------------
 
 _STORAGE_STATE = Path.home() / ".notebooklm" / "storage_state.json"
@@ -209,14 +268,11 @@ _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "__Secure-3PSID", "SAPISID"}
 def _check_auth_from_storage() -> str:
     if not _STORAGE_STATE.exists():
         return "not_logged_in"
-
     try:
         import json
         import time
-
         data = json.loads(_STORAGE_STATE.read_text())
         cookies = {c["name"]: c for c in data.get("cookies", [])}
-
         now = time.time()
         for name in _AUTH_COOKIE_NAMES:
             if name not in cookies:
@@ -224,7 +280,6 @@ def _check_auth_from_storage() -> str:
             exp = cookies[name].get("expires", -1)
             if exp != -1 and exp < now:
                 return "session_expired"
-
         return "authenticated"
     except Exception:
         return "session_expired"
@@ -235,47 +290,14 @@ async def get_auth_status():
     return AuthStatus(status=_check_auth_from_storage())
 
 
-# ---------------------------------------------------------------------------
-# Settings routes
-# ---------------------------------------------------------------------------
-
-
-class ApiInfoResponse(BaseModel):
-    base_url: str
-    api_keys: list[str]
-    has_keys: bool
-
-
-def _mask_key(key: str) -> str:
-    if len(key) <= 10:
-        return key[:2] + "***" if len(key) > 2 else "***"
-    return key[:7] + "***" + key[-3:]
-
-
-@app.get("/api/settings/api-info", response_model=ApiInfoResponse)
-async def get_api_info():
-    """外部連携APIの設定情報を返す（APIキーはマスキング済み）"""
-    raw = os.environ.get("NOTEVIDEO_API_KEYS", "")
-    keys = [k.strip() for k in raw.split(",") if k.strip()]
-    masked = [_mask_key(k) for k in keys]
-    host = os.environ.get("API_BASE_URL", "http://localhost:8000")
-    return ApiInfoResponse(
-        base_url=f"{host}/api/v1",
-        api_keys=masked,
-        has_keys=bool(keys),
-    )
-
-
 def _find_notebooklm() -> str:
     cmd = shutil.which("notebooklm")
     if cmd:
         return cmd
-
     bin_dir = Path(sys.executable).parent
     candidate = bin_dir / "notebooklm"
     if candidate.exists():
         return str(candidate)
-
     for prefix in [
         "/Library/Frameworks/Python.framework/Versions/3.10/bin",
         "/Library/Frameworks/Python.framework/Versions/3.11/bin",
@@ -287,7 +309,6 @@ def _find_notebooklm() -> str:
         candidate = Path(prefix) / "notebooklm"
         if candidate.exists():
             return str(candidate)
-
     raise FileNotFoundError(
         "notebooklm コマンドが見つかりません。"
         "`pip install 'notebooklm-py[browser]'` でインストールしてください。"
@@ -312,7 +333,142 @@ async def trigger_login():
 
 
 # ---------------------------------------------------------------------------
-# Job routes
+# GitHub OAuth routes
+# ---------------------------------------------------------------------------
+
+_GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+_GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+_FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+
+@app.get("/api/auth/github")
+async def github_oauth_start():
+    """GitHub OAuth を開始。別タブで開く想定。"""
+    if not _GITHUB_CLIENT_ID:
+        raise HTTPException(
+            status_code=500,
+            detail="GITHUB_CLIENT_ID が設定されていません。.env に設定してください。",
+        )
+    from urllib.parse import urlencode
+
+    base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    redirect_uri = f"{base_url}/api/auth/github/callback"
+    params = {
+        "client_id": _GITHUB_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "scope": "user:email read:user",
+    }
+    return RedirectResponse(
+        url=f"https://github.com/login/oauth/authorize?{urlencode(params)}",
+        status_code=302,
+    )
+
+
+@app.get("/api/auth/github/callback")
+async def github_oauth_callback(code: Optional[str] = None, error: Optional[str] = None):
+    """GitHub OAuth コールバック。トークン交換後、フロントエンドにリダイレクト。"""
+    if error:
+        return RedirectResponse(
+            url=f"{_FRONTEND_URL}/login?error={error}",
+            status_code=302,
+        )
+    if not code:
+        raise HTTPException(status_code=400, detail="認証コードがありません")
+    if not _GITHUB_CLIENT_ID or not _GITHUB_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET が設定されていません。",
+        )
+
+    import httpx
+    from urllib.parse import urlencode
+
+    async with httpx.AsyncClient() as client:
+        # トークン交換
+        token_res = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": _GITHUB_CLIENT_ID,
+                "client_secret": _GITHUB_CLIENT_SECRET,
+                "code": code,
+            },
+        )
+        token_res.raise_for_status()
+        token_data = token_res.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return RedirectResponse(
+                url=f"{_FRONTEND_URL}/login?error=access_denied",
+                status_code=302,
+            )
+
+        # ユーザー情報取得
+        user_res = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        user_res.raise_for_status()
+        gh_user = user_res.json()
+
+        # メール取得（非公開の場合は別API）
+        email = gh_user.get("email")
+        if not email:
+            em_res = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if em_res.status_code == 200:
+                emails = em_res.json()
+                primary = next((e for e in emails if e.get("primary")), emails[0] if emails else None)
+                if primary:
+                    email = primary.get("email", "")
+        if not email:
+            email = f"{gh_user.get('id', '')}@users.noreply.github.com"
+
+        display_name = gh_user.get("name") or gh_user.get("login") or "GitHub User"
+
+    user = await database.get_or_create_user(email, display_name)
+
+    # フロントエンドにリダイレクト（user_id をクエリで渡す）
+    from urllib.parse import urlencode
+    q = urlencode({
+        "user_id": user["id"],
+        "email": user["email"],
+        "display_name": user.get("display_name", user.get("displayName", display_name)),
+    })
+    return RedirectResponse(
+        url=f"{_FRONTEND_URL}/login/callback?{q}",
+        status_code=302,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settings routes
+# ---------------------------------------------------------------------------
+
+
+def _mask_key(key: str) -> str:
+    if len(key) <= 10:
+        return key[:2] + "***" if len(key) > 2 else "***"
+    return key[:7] + "***" + key[-3:]
+
+
+@app.get("/api/settings/api-info", response_model=ApiInfoResponse)
+async def get_api_info():
+    raw = os.environ.get("NOTEVIDEO_API_KEYS", "")
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
+    masked = [_mask_key(k) for k in keys]
+    host = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    return ApiInfoResponse(
+        base_url=f"{host}/api/v1",
+        api_keys=masked,
+        has_keys=bool(keys),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Job routes（管理用・後方互換）
 # ---------------------------------------------------------------------------
 
 
@@ -337,206 +493,400 @@ async def get_job(job_id: str):
     return await database.store_get(job_id)
 
 
-@app.post("/api/jobs", response_model=Job, status_code=201)
-async def create_job(
-    background_tasks: BackgroundTasks,
-    csvFiles: List[UploadFile] = File(...),
-    notebookTitle: str = Form(default="CSV分析レポート"),
-    instructions: str = Form(default="CSVデータの主要な傾向と示唆を分かりやすく解説してください"),
-    style: str = Form(default="whiteboard"),
-    format: str = Form(default="explainer"),
-    language: str = Form(default="ja"),
-    timeout: int = Form(default=1800),
-):
-    if not csvFiles:
-        raise HTTPException(status_code=400, detail="CSVファイルを1つ以上指定してください")
-
-    import uuid
-
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    now = _now()
-
-    csv_paths: list[Path] = []
-    file_names: list[str] = []
-
-    for upload in csvFiles:
-        safe_name = upload.filename or "upload.csv"
-        content = await upload.read()
-
-        # ローカルに一時保存（notebooklm-py がローカルパスを必要とするため）
-        local_path = storage.save_csv_locally(UPLOADS_DIR, job_id, safe_name, content)
-        csv_paths.append(local_path)
-        file_names.append(safe_name)
-
-        # S3 が有効な場合はバックグラウンドで S3 にもアップロード
-        storage.upload_csv_to_s3(job_id, safe_name, content)
-
-    output_path = OUTPUTS_DIR / f"{job_id}.mp4"
-
-    job: dict = {
-        "id": job_id,
-        "csvFileNames": ",".join(file_names),
-        "notebookTitle": notebookTitle,
-        "instructions": instructions,
-        "style": style,
-        "format": format,
-        "language": language,
-        "timeout": timeout,
-        "status": "pending",
-        "steps": _initial_steps(),
-        "currentStep": None,
-        "errorMessage": None,
-        "createdAt": now,
-        "updatedAt": now,
-        "completedAt": None,
-        "callbackUrl": None,
-    }
-
-    await database.store_create(job)
-
-    background_tasks.add_task(
-        run_job,
-        job_id=job_id,
-        csv_paths=csv_paths,
-        output_path=output_path,
-        notebook_title=notebookTitle,
-        instructions=instructions,
-        style=style,
-        video_format=format,
-        language=language,
-        timeout=timeout,
-        store_update=database.store_update,
-        semaphore=_job_semaphore,
-    )
-
-    return job
-
-
 @app.get("/api/jobs/{job_id}/download")
 async def download_job(job_id: str):
     job = await database.store_get(job_id)
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="ファイルはまだ準備ができていません")
 
-    job_type = job.get("jobType", "video")
+    if storage.is_s3_enabled():
+        url = storage.generate_mp4_download_url(job_id)
+        if url is None:
+            raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
+        return RedirectResponse(url=url, status_code=302)
 
-    if job_type == "audio":
-        # S3 モード: S3 から音声バイト列を取得して直接返す
-        if storage.is_s3_enabled():
-            audio_bytes = storage.download_audio_from_s3(job_id, suffix=".wav")
-            if audio_bytes is None:
-                raise HTTPException(status_code=500, detail="音声ファイルの取得に失敗しました")
+    output_path = OUTPUTS_DIR / f"{job_id}.mp4"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
 
-            safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
-            return Response(
-                content=audio_bytes,
-                media_type="audio/wav",
-                headers={"Content-Disposition": f'attachment; filename="{safe_title}.wav"'},
-            )
-
-        # ローカルモード: ファイルを直接返す
-        output_path = OUTPUTS_DIR / f"{job_id}.wav"
-        if not output_path.exists():
-            raise HTTPException(status_code=404, detail="音声ファイルが見つかりません")
-
-        safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
-        return FileResponse(
-            path=str(output_path),
-            media_type="audio/wav",
-            filename=f"{safe_title}.wav",
-        )
-    else:
-        # S3 モード: 署名付き URL にリダイレクト
-        if storage.is_s3_enabled():
-            url = storage.generate_mp4_download_url(job_id)
-            if url is None:
-                raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")
-            return RedirectResponse(url=url, status_code=302)
-
-        # ローカルモード: ファイルを直接返す
-        output_path = OUTPUTS_DIR / f"{job_id}.mp4"
-        if not output_path.exists():
-            raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
-
-        safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
-        return FileResponse(
-            path=str(output_path),
-            media_type="video/mp4",
-            filename=f"{safe_title}.mp4",
-        )
-
-
-@app.post("/api/audio-jobs", response_model=Job, status_code=201)
-async def create_audio_job(
-    background_tasks: BackgroundTasks,
-    csvFiles: List[UploadFile] = File(...),
-    title: str = Form(default="CSV音声解説"),
-    instructions: str = Form(default="CSVデータの主要な傾向と示唆を分かりやすく解説してください"),
-    voiceName: str = Form(default="Kore"),
-    language: str = Form(default="ja"),
-    timeout: int = Form(default=600),
-    stylePrompt: str = Form(default=""),
-):
-    if not csvFiles:
-        raise HTTPException(status_code=400, detail="CSVファイルを1つ以上指定してください")
-
-    import uuid
-
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    now = _now()
-
-    csv_paths: list[Path] = []
-    file_names: list[str] = []
-
-    for upload in csvFiles:
-        safe_name = upload.filename or "upload.csv"
-        content = await upload.read()
-
-        local_path = storage.save_csv_locally(UPLOADS_DIR, job_id, safe_name, content)
-        csv_paths.append(local_path)
-        file_names.append(safe_name)
-
-        storage.upload_csv_to_s3(job_id, safe_name, content)
-
-    output_path = OUTPUTS_DIR / f"{job_id}.wav"
-
-    job: dict = {
-        "id": job_id,
-        "jobType": "audio",
-        "csvFileNames": ",".join(file_names),
-        "notebookTitle": title,
-        "instructions": instructions,
-        "style": None,
-        "format": None,
-        "language": language,
-        "timeout": timeout,
-        "status": "pending",
-        "steps": _audio_initial_steps(),
-        "currentStep": None,
-        "errorMessage": None,
-        "createdAt": now,
-        "updatedAt": now,
-        "completedAt": None,
-        "callbackUrl": None,
-        "voiceName": voiceName,
-        "generatedScript": None,
-    }
-
-    await database.store_create(job)
-
-    background_tasks.add_task(
-        run_audio_job,
-        job_id=job_id,
-        csv_paths=csv_paths,
-        output_path=output_path,
-        title=title,
-        instructions=instructions,
-        voice_name=voiceName,
-        language=language,
-        timeout=timeout,
-        style_prompt=stylePrompt,
-        store_update=database.store_update,
-        semaphore=_job_semaphore,
+    safe_title = job["notebookTitle"].replace("/", "_").replace("\\", "_")
+    return FileResponse(
+        path=str(output_path),
+        media_type="video/mp4",
+        filename=f"{safe_title}.mp4",
     )
 
-    return job
+
+# ---------------------------------------------------------------------------
+# E-learning: Videos routes
+# ---------------------------------------------------------------------------
+
+
+def _build_wiki_url(git_path: Optional[str]) -> Optional[str]:
+    """article の git_path から Wiki サイトの URL を構築する"""
+    if not git_path:
+        return None
+    base = os.environ.get("WIKI_BASE_URL", "").rstrip("/")
+    if not base:
+        # WIKI_GIT_REPO_URL から導出を試みる
+        repo_url = os.environ.get("WIKI_GIT_REPO_URL", "").rstrip("/").removesuffix(".git")
+        branch = os.environ.get("WIKI_GIT_BRANCH", "main")
+        if repo_url and "github.com" in repo_url:
+            base = f"{repo_url}/blob/{branch}"
+        else:
+            return None
+    return f"{base}/{git_path}" if base else None
+
+
+def _video_dict_to_response(v: dict, viewer_count: int = 0, view_count: int = 0) -> VideoResponse:
+    git_path = v.get("article_git_path")
+    wiki_url = _build_wiki_url(git_path) if git_path else None
+    return VideoResponse(
+        id=v["id"],
+        title=v["title"],
+        description=v.get("description"),
+        thumbnailUrl=v.get("thumbnail_url"),
+        durationSec=v.get("duration_sec"),
+        style=v.get("style"),
+        status=v.get("status", "generating"),
+        publishedAt=str(v["published_at"]) if v.get("published_at") else None,
+        createdAt=str(v.get("created_at", "")),
+        updatedAt=str(v.get("updated_at", "")),
+        jobId=v.get("job_id"),
+        articleId=v.get("article_id"),
+        categoryId=v.get("category_id"),
+        categoryName=v.get("category_name"),
+        categorySlug=v.get("category_slug"),
+        watched=v.get("watched"),
+        watchLater=v.get("watch_later"),
+        liked=v.get("liked"),
+        wikiUrl=wiki_url,
+        viewerCount=viewer_count,
+        viewCount=view_count,
+    )
+
+
+@app.get("/api/videos", response_model=list[VideoResponse])
+async def get_videos(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    locale: Optional[str] = None,
+    published_after: Optional[str] = None,
+    x_user_id: Optional[str] = Header(default=None),
+):
+    language = locale if locale in ("ja", "vi") else "ja"
+    videos = await database.list_videos(
+        category_slug=category,
+        search=search,
+        status=status,
+        limit=limit,
+        offset=offset,
+        user_id=x_user_id,
+        language=language,
+        published_after=published_after,
+    )
+    if x_user_id:
+        watch_later_ids = await database.get_watch_later_ids(x_user_id)
+        liked_ids = await database.get_liked_video_ids(x_user_id)
+        for v in videos:
+            v["watch_later"] = v["id"] in watch_later_ids
+            v["liked"] = v["id"] in liked_ids
+    return [_video_dict_to_response(v) for v in videos]
+
+
+@app.get("/api/videos/{video_id}", response_model=VideoResponse)
+async def get_video(video_id: str, x_user_id: Optional[str] = Header(default=None)):
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    if x_user_id:
+        history = await database.get_watch_history(x_user_id, limit=1000)
+        watched_ids = {h["video_id"] for h in history}
+        video["watched"] = video_id in watched_ids
+        watch_later_ids = await database.get_watch_later_ids(x_user_id)
+        liked_ids = await database.get_liked_video_ids(x_user_id)
+        video["watch_later"] = video_id in watch_later_ids
+        video["liked"] = video_id in liked_ids
+    viewer_count, view_count = await database.get_video_watch_counts(video_id)
+    return _video_dict_to_response(video, viewer_count, view_count)
+
+
+@app.get("/api/videos/{video_id}/stream")
+async def stream_video(video_id: str):
+    """動画をストリーミングまたはダウンロードURLを返す"""
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    if video.get("status") != "ready":
+        raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
+
+    job_id = video.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=404, detail="動画ファイルの情報が見つかりません")
+
+    if storage.is_s3_enabled():
+        url = storage.generate_mp4_streaming_url(job_id, expires_in=86400)
+        if url:
+            return RedirectResponse(url=url, status_code=302)
+
+    output_path = OUTPUTS_DIR / f"{job_id}.mp4"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
+
+    def iter_file():
+        with open(output_path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                yield chunk
+
+    return StreamingResponse(iter_file(), media_type="video/mp4")
+
+
+@app.post("/api/videos/{video_id}/watch")
+async def record_watch(
+    video_id: str,
+    req: WatchRequest,
+    x_user_id: Optional[str] = Header(default=None),
+):
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="ユーザーIDが必要です")
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    record = await database.record_watch(x_user_id, video_id, req.completed)
+    return {"success": True, "record": record}
+
+
+# ---------------------------------------------------------------------------
+# E-learning: Categories routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/categories", response_model=list[CategoryResponse])
+async def get_categories(locale: Optional[str] = None):
+    language = locale if locale in ("ja", "vi") else "ja"
+    cats = await database.get_categories(language=language)
+    return [
+        CategoryResponse(
+            id=c["id"],
+            name=c["name"],
+            slug=c["slug"],
+            description=c.get("description"),
+            sortOrder=c.get("sort_order", c.get("sortOrder", 0)),
+            videoCount=c.get("videoCount", c.get("video_count", 0)),
+        )
+        for c in cats
+    ]
+
+
+# ---------------------------------------------------------------------------
+# E-learning: Users routes
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/users/login", response_model=UserResponse)
+async def user_login(req: UserLoginRequest, response: Response):
+    if not req.email or not req.displayName:
+        raise HTTPException(status_code=400, detail="メールアドレスと名前は必須です")
+    user = await database.get_or_create_user(req.email, req.displayName)
+    response.set_cookie(
+        key="user_id",
+        value=user["id"],
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        displayName=user.get("display_name", user.get("displayName", "")),
+        createdAt=str(user.get("created_at", "")),
+    )
+
+
+@app.get("/api/users/me", response_model=UserResponse)
+async def get_current_user(
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    user = await database.get_user(uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        displayName=user.get("display_name", user.get("displayName", "")),
+        createdAt=str(user.get("created_at", "")),
+    )
+
+
+@app.get("/api/users/me/history", response_model=list[WatchHistoryItem])
+async def get_watch_history(
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+    limit: int = 50,
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    history = await database.get_watch_history(uid, limit=limit)
+    return [
+        WatchHistoryItem(
+            id=h["id"],
+            userId=h["user_id"],
+            videoId=h["video_id"],
+            videoTitle=h.get("videoTitle", h.get("video_title")),
+            videoStatus=h.get("videoStatus", h.get("video_status")),
+            categoryName=h.get("categoryName", h.get("category_name")),
+            categorySlug=h.get("categorySlug", h.get("category_slug")),
+            completed=bool(h.get("completed", True)),
+            watchedAt=str(h.get("watched_at", "")),
+        )
+        for h in history
+    ]
+
+
+@app.post("/api/videos/{video_id}/watch-later")
+async def toggle_watch_later(
+    video_id: str,
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    added = await database.toggle_watch_later(uid, video_id)
+    return {"success": True, "added": added}
+
+
+@app.post("/api/videos/{video_id}/liked")
+async def toggle_liked_video(
+    video_id: str,
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    added = await database.toggle_liked_video(uid, video_id)
+    return {"success": True, "added": added}
+
+
+@app.get("/api/users/me/watch-later", response_model=list[VideoResponse])
+async def get_watch_later(
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+    limit: int = 100,
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    videos = await database.get_watch_later_videos(uid, limit=limit)
+    watch_later_ids = {v["id"] for v in videos}
+    liked_ids = await database.get_liked_video_ids(uid)
+    history = await database.get_watch_history(uid, limit=1000)
+    watched_ids = {h["video_id"] for h in history}
+    for v in videos:
+        v["watched"] = v["id"] in watched_ids
+        v["watch_later"] = True
+        v["liked"] = v["id"] in liked_ids
+    return [_video_dict_to_response(v) for v in videos]
+
+
+@app.get("/api/users/me/liked", response_model=list[VideoResponse])
+async def get_liked_videos(
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+    limit: int = 100,
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    videos = await database.get_liked_videos(uid, limit=limit)
+    liked_ids = {v["id"] for v in videos}
+    watch_later_ids = await database.get_watch_later_ids(uid)
+    history = await database.get_watch_history(uid, limit=1000)
+    watched_ids = {h["video_id"] for h in history}
+    for v in videos:
+        v["watched"] = v["id"] in watched_ids
+        v["watch_later"] = v["id"] in watch_later_ids
+        v["liked"] = True
+    return [_video_dict_to_response(v) for v in videos]
+
+
+# ---------------------------------------------------------------------------
+# Wiki sync routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/wiki/directories")
+async def get_wiki_directories():
+    """リポジトリ内の .md を含むディレクトリ一覧を返す"""
+    from wiki_sync import get_wiki_directories as _get_dirs
+    return _get_dirs()
+
+
+@app.post("/api/wiki/sync-directory")
+async def trigger_wiki_sync_directory(background_tasks: BackgroundTasks, path: str = ""):
+    """指定ディレクトリ配下の .md ファイルのみを同期し、動画生成を実行する"""
+    from wiki_sync import sync_wiki_from_directory
+
+    async def _do_sync():
+        result = await sync_wiki_from_directory(
+            relative_dir=path,
+            store_update_fn=database.store_update,
+            run_job_fn=run_job,
+            semaphore=_job_semaphore,
+            outputs_dir=OUTPUTS_DIR,
+        )
+        logger.info("Wiki ディレクトリ同期結果: %s", result)
+
+    background_tasks.add_task(_do_sync)
+    return {"message": "ディレクトリの動画作成を開始しました"}
+
+
+@app.get("/api/wiki/sync-status")
+async def get_wiki_sync_status():
+    """Wiki同期の現在の状態を返す"""
+    from wiki_sync import get_sync_status
+    return get_sync_status()
+
+
+# ---------------------------------------------------------------------------
+# Admin routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/admin/articles", response_model=list[ArticleResponse])
+async def get_admin_articles():
+    """記事一覧と動画生成状況を返す（管理用）"""
+    articles = await database.list_articles()
+    return [
+        ArticleResponse(
+            id=a["id"],
+            title=a["title"],
+            gitPath=a.get("git_path", a.get("gitPath", "")),
+            gitHash=a.get("git_hash"),
+            categoryId=a.get("category_id"),
+            categoryName=a.get("categoryName", a.get("category_name")),
+            latestVideoId=a.get("latestVideoId", a.get("latest_video_id")),
+            latestVideoStatus=a.get("latestVideoStatus", a.get("latest_video_status")),
+            createdAt=str(a.get("created_at", "")),
+            updatedAt=str(a.get("updated_at", "")),
+        )
+        for a in articles
+    ]
+
+
+logger = logging.getLogger(__name__)

@@ -16,16 +16,14 @@ import type { Job } from "@/lib/types";
 import { VIDEO_STYLE_LABELS } from "@/lib/types";
 import { formatDistanceToNow } from "@/lib/date-utils";
 import { api } from "@/lib/api";
-import { ArrowRight, Download, FileSpreadsheet, Video, Mic } from "lucide-react";
+import { ArrowRight, Download, FileSpreadsheet, Video } from "lucide-react";
 
 interface JobTableProps {
   jobs: Job[];
 }
 
 function getProgress(job: Job): number {
-  const videoSteps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
-  const audioSteps = ["read_csv", "generate_script", "generate_audio", "download_ready"];
-  const steps = job.jobType === "audio" ? audioSteps : videoSteps;
+  const steps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
   const idx = steps.indexOf(job.currentStep ?? "");
   if (idx === -1) return 0;
   return ((idx + 1) / steps.length) * 100;
@@ -39,10 +37,10 @@ function EmptyState() {
       </div>
       <p className="text-sm font-medium text-foreground mb-1">ジョブがありません</p>
       <p className="text-xs text-muted-foreground mb-5">
-        まだジョブが生成されていません。CSVファイルをアップロードして始めましょう。
+        まだジョブがありません。管理画面からディレクトリを選択して動画作成を実行してください。
       </p>
       <Button asChild size="sm">
-        <Link href="/generate">最初の動画を生成する</Link>
+        <Link href="/admin">管理画面で動画作成を実行する</Link>
       </Button>
     </div>
   );
@@ -73,11 +71,7 @@ export function JobTable({ jobs }: JobTableProps) {
             <TableRow key={job.id} className="group hover:bg-muted/20">
               <TableCell>
                 <div className="flex items-center justify-center size-7 rounded-md bg-muted shrink-0">
-                  {job.jobType === "audio" ? (
-                    <Mic className="size-3.5 text-muted-foreground" />
-                  ) : (
-                    <Video className="size-3.5 text-muted-foreground" />
-                  )}
+                  <Video className="size-3.5 text-muted-foreground" />
                 </div>
               </TableCell>
               <TableCell>
@@ -99,16 +93,10 @@ export function JobTable({ jobs }: JobTableProps) {
                 </div>
               </TableCell>
               <TableCell>
-                {job.jobType === "audio" ? (
-                  <span className="text-sm text-muted-foreground">
-                    {job.voiceName ?? "—"}
-                  </span>
-                ) : (
-                  <span className="text-sm text-muted-foreground">
-                    {job.style ? VIDEO_STYLE_LABELS[job.style]?.label : "—"}
-                    {job.format ? ` / ${job.format === "explainer" ? "解説型" : "短縮版"}` : ""}
-                  </span>
-                )}
+                <span className="text-sm text-muted-foreground">
+                  {job.style ? VIDEO_STYLE_LABELS[job.style as keyof typeof VIDEO_STYLE_LABELS]?.label ?? "—" : "—"}
+                  {job.format ? ` / ${job.format === "explainer" ? "解説型" : "短縮版"}` : ""}
+                </span>
               </TableCell>
               <TableCell>
                 <JobStatusBadge status={job.status} />

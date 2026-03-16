@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { Download, RefreshCw, ArrowLeft, FileSpreadsheet, Loader2, Video, Mic } from "lucide-react";
+import { Download, RefreshCw, ArrowLeft, FileSpreadsheet, Loader2, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -58,8 +58,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
     );
   }
 
-  const isAudio = job.jobType === "audio";
-  const retryHref = isAudio ? "/generate-audio" : "/generate";
+  const retryHref = "/admin";
 
   return (
     <div className="space-y-6">
@@ -67,11 +66,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex items-center justify-center size-9 rounded-lg bg-muted shrink-0">
-            {isAudio ? (
-              <Mic className="size-4 text-muted-foreground" />
-            ) : (
-              <FileSpreadsheet className="size-4 text-muted-foreground" />
-            )}
+            <FileSpreadsheet className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -88,7 +83,7 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             <Button asChild size="sm" className="gap-1.5">
               <a href={api.getDownloadUrl(job.id)} download>
                 <Download className="size-3.5" />
-                {isAudio ? "音声をダウンロード" : "動画をダウンロード"}
+                動画をダウンロード
               </a>
             </Button>
           )}
@@ -128,14 +123,10 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
             <CardTitle className="text-sm font-semibold">ジョブ設定</CardTitle>
           </CardHeader>
           <CardContent className="space-y-0 divide-y divide-border">
-            {isAudio ? (
-              <DetailRow label="ボイス" value={job.voiceName ?? "—"} />
-            ) : (
-              <>
-                <DetailRow label="スタイル" value={job.style ? VIDEO_STYLE_LABELS[job.style]?.label : "—"} />
-                <DetailRow label="フォーマット" value={job.format === "explainer" ? "解説型" : job.format === "brief" ? "短縮版" : "—"} />
-              </>
-            )}
+            <>
+              <DetailRow label="スタイル" value={job.style ? VIDEO_STYLE_LABELS[job.style as keyof typeof VIDEO_STYLE_LABELS]?.label ?? "—" : "—"} />
+              <DetailRow label="フォーマット" value={job.format === "explainer" ? "解説型" : job.format === "brief" ? "短縮版" : "—"} />
+            </>
             <DetailRow label="言語" value={job.language === "ja" ? "日本語" : job.language} />
             <DetailRow
               label="タイムアウト"
@@ -153,28 +144,12 @@ export default function JobDetailPage({ params }: JobDetailPageProps) {
       {/* Instructions */}
       <Card className="border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">
-            {isAudio ? "解説への指示文" : "動画への指示文"}
-          </CardTitle>
+          <CardTitle className="text-sm font-semibold">動画への指示文</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground leading-relaxed">{job.instructions}</p>
         </CardContent>
       </Card>
-
-      {/* Generated script (audio jobs only) */}
-      {isAudio && job.generatedScript && (
-        <Card className="border-border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold">生成された解説原稿</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-              {job.generatedScript}
-            </p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

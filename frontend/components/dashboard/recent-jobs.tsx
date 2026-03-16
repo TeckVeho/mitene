@@ -9,7 +9,7 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { VIDEO_STYLE_LABELS } from "@/lib/types";
 import type { Job } from "@/lib/types";
 import { formatDistanceToNow } from "@/lib/date-utils";
-import { ArrowRight, FileSpreadsheet, Video, Mic } from "lucide-react";
+import { ArrowRight, FileSpreadsheet, Video } from "lucide-react";
 
 export function RecentJobs() {
   const { data: jobs, isLoading } = useJobs();
@@ -40,7 +40,7 @@ export function RecentJobs() {
             </div>
             <p className="text-sm text-muted-foreground">まだジョブが生成されていません</p>
             <Button asChild size="sm" className="mt-4">
-              <Link href="/generate">最初の動画を生成する</Link>
+              <Link href="/admin">管理画面で動画作成を実行する</Link>
             </Button>
           </div>
         ) : (
@@ -52,11 +52,7 @@ export function RecentJobs() {
                   className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                 >
                   <div className="flex items-center justify-center size-8 rounded-md bg-muted shrink-0">
-                    {job.jobType === "audio" ? (
-                      <Mic className="size-4 text-muted-foreground" />
-                    ) : (
-                      <FileSpreadsheet className="size-4 text-muted-foreground" />
-                    )}
+                    <FileSpreadsheet className="size-4 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -88,16 +84,11 @@ export function RecentJobs() {
 }
 
 function getJobSubtitle(job: Job): string {
-  if (job.jobType === "audio") {
-    return `音声 · ${job.voiceName ?? "—"}`;
-  }
-  return job.style ? VIDEO_STYLE_LABELS[job.style]?.label ?? "動画" : "動画";
+  return job.style ? VIDEO_STYLE_LABELS[job.style as keyof typeof VIDEO_STYLE_LABELS]?.label ?? "動画" : "動画";
 }
 
 function getProgress(job: Job): number {
-  const videoSteps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
-  const audioSteps = ["read_csv", "generate_script", "generate_audio", "download_ready"];
-  const steps = job.jobType === "audio" ? audioSteps : videoSteps;
+  const steps = ["create_notebook", "add_source", "generate_video", "wait_completion", "download_ready"];
   const idx = steps.indexOf(job.currentStep ?? "");
   if (idx === -1) return 0;
   return ((idx + 1) / steps.length) * 100;

@@ -1,9 +1,13 @@
 """
 バックグラウンドジョブランナー
-generate_video_from_csv.py のロジックを元に、各ステップでジョブストアを更新する。
+.md（Markdown）または CSV ファイルを NotebookLM に送り動画を生成する。
 
 S3_BUCKET_NAME 環境変数が設定されている場合、MP4 生成後に S3 へアップロードし、
 ローカルの一時ファイルを削除する。
+
+ジョブ完了後:
+  - videos テーブルを更新
+  - Slack 通知を送信
 """
 
 import asyncio
@@ -87,7 +91,8 @@ async def _wait_for_source_ready(
 async def run_job(
     *,
     job_id: str,
-    csv_paths: list[Path],
+    source_paths: Optional[list[Path]] = None,
+    csv_paths: Optional[list[Path]] = None,  # 後方互換
     output_path: Path,
     notebook_title: str,
     instructions: str,
@@ -101,14 +106,20 @@ async def run_job(
 ) -> None:
     """
     ジョブを非同期バックグラウンドで実行する。
+    source_paths には .md または .csv ファイルのパスを渡す。
 
     ステップ:
       1. ノートブック作成
-      2. CSV ソース追加
+      2. ドキュメントソース追加
       3. 動画生成開始
       4. 生成完了待機
       5. MP4 ダウンロード（→ S3 が有効な場合は S3 にアップロード）
+      6. videos テーブル更新 + Slack 通知
     """
+    # 後方互換: csv_paths が渡された場合は source_paths として扱う
+    if source_paths is None:
+        source_paths = csv_paths or []
+
     if semaphore is not None:
         await semaphore.acquire()
 
@@ -123,6 +134,8 @@ async def run_job(
                 "pip install 'notebooklm-py[browser]' を実行してください。"
             ),
         )
+        if semaphore is not None:
+            semaphore.release()
         return
 
     style_map: dict[str, VideoStyle] = {
@@ -159,27 +172,29 @@ async def run_job(
                 store_update, job_id, steps, "create_notebook", "completed"
             )
 
-            # ── Step 2: CSV をソースとして追加 ───────────────────────
-            total = len(csv_paths)
-            for idx, csv_path in enumerate(csv_paths, start=1):
+            # ── Step 2: ソース追加 ────────────────────────────────────
+            total = len(source_paths)
+            for idx, source_path in enumerate(source_paths, start=1):
                 progress = f"({idx}/{total})" if total > 1 else ""
+                ext = source_path.suffix.lower()
+                file_type = "Markdown" if ext == ".md" else "CSV"
                 steps = await _set_step_status(
                     store_update, job_id, steps, "add_source", "in_progress",
-                    message=f"CSVファイルをアップロード中... {progress}"
+                    message=f"{file_type}ファイルをアップロード中... {progress}"
                 )
-                source = await client.sources.add_file(nb.id, csv_path)
+                source = await client.sources.add_file(nb.id, source_path)
 
                 steps = await _set_step_status(
                     store_update, job_id, steps, "add_source", "in_progress",
                     message=f"ソースのインデックスを作成中... {progress}"
                 )
                 ready = await _wait_for_source_ready(
-                    client, nb.id, source.id, csv_path.name
+                    client, nb.id, source.id, source_path.name
                 )
                 if not ready:
                     error_msg = (
-                        f"{csv_path.name} のインデックス作成がタイムアウトしました。"
-                        "CSVファイルのサイズを確認してください。"
+                        f"{source_path.name} のインデックス作成がタイムアウトしました。"
+                        "ファイルのサイズを確認してください。"
                     )
                     await _fail_job(store_update, job_id, steps, "add_source", error_msg)
                     if callback_url:
@@ -242,7 +257,6 @@ async def run_job(
             )
             await client.artifacts.download_video(nb.id, str(output_path))
 
-            # S3 が有効な場合: ローカルに保存後 S3 にアップロードし一時ファイル削除
             if storage_mod.is_s3_enabled():
                 steps = await _set_step_status(
                     store_update, job_id, steps, "download_ready", "in_progress",
@@ -256,8 +270,8 @@ async def run_job(
                 store_update, job_id, steps, "download_ready", "completed"
             )
 
-        # ローカル CSV 一時ファイルを削除
-        storage_mod.cleanup_local_csv(csv_paths)
+        # ローカル一時ファイルを削除
+        storage_mod.cleanup_local_csv(source_paths)
 
         from datetime import datetime, timezone
         completed_at = datetime.now(timezone.utc).isoformat()
@@ -267,6 +281,9 @@ async def run_job(
             steps=steps,
             completedAt=completed_at,
         )
+
+        # ── Step 6: videos テーブルを更新 + Slack 通知 ────────────
+        await _on_job_completed(job_id, notebook_title)
 
         if callback_url:
             await send_webhook(
@@ -316,3 +333,31 @@ async def run_job(
     finally:
         if semaphore is not None:
             semaphore.release()
+
+
+async def _on_job_completed(job_id: str, title: str) -> None:
+    """ジョブ完了後の後処理: videos テーブル更新 + Slack 通知"""
+    try:
+        import database as db
+        from datetime import datetime, timezone
+        from slack_notifier import notify_video_ready
+
+        video = await db.get_video_by_job_id(job_id)
+        if video:
+            from datetime import datetime, timezone
+            published_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            await db.update_video(
+                video["id"],
+                status="ready",
+                published_at=published_at,
+            )
+            updated_video = await db.get_video(video["id"])
+            await notify_video_ready(
+                video_id=video["id"],
+                title=title,
+                category_name=updated_video.get("category_name") if updated_video else None,
+            )
+        else:
+            logger.warning("ジョブ %s に対応する動画レコードが見つかりません", job_id)
+    except Exception as e:
+        logger.error("ジョブ完了後処理エラー job_id=%s: %s", job_id, e)
