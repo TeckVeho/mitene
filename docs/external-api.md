@@ -1,26 +1,23 @@
-# 外部API 実装手順書
+# 外部 API 仕様書
 
-本ドキュメントは、NoteVideo バックエンドを外部システムから利用するための外部API（`/api/v1/`）の仕様・実装内容・利用方法をまとめたものです。
+mitene（V-learning）バックエンドを外部システムから利用するための外部 API（`/api/v1/`）の仕様です。
 
 ---
 
 ## 目次
 
 1. [概要・アーキテクチャ](#概要アーキテクチャ)
-2. [実装済みファイル一覧](#実装済みファイル一覧)
-3. [セットアップ](#セットアップ)
-4. [認証](#認証)
-5. [エンドポイント仕様（動画）](#エンドポイント仕様)
-6. [Webhook通知](#webhook通知)
-7. [利用例（cURL）](#利用例curl)
-8. [音声解説API](#音声解説api)
-9. [既存フロントエンドAPIとの共存](#既存フロントエンドapiとの共存)
+2. [セットアップ](#セットアップ)
+3. [認証](#認証)
+4. [エンドポイント仕様](#エンドポイント仕様)
+5. [Webhook 通知](#webhook通知)
+6. [利用例（cURL）](#利用例curl)
 
 ---
 
 ## 概要・アーキテクチャ
 
-外部システムからCSVファイルを送信すると、Google NotebookLM を使って AI 解説動画（MP4）を自動生成し、ダウンロード可能にする API です。
+外部システムから Markdown（.md）または CSV ファイルを送信すると、Google NotebookLM を使って AI 解説動画（MP4）を自動生成し、ダウンロード可能にする API です。
 
 ```
 外部システム
@@ -41,58 +38,31 @@ MP4ダウンロード
 
 **処理の流れ**
 
-1. 外部システムが `POST /api/v1/jobs` でCSVと設定を送信
+1. 外部システムが `POST /api/v1/jobs` で Markdown/CSV と設定を送信
 2. API がジョブを作成し `job_id` を即時返却（非同期処理開始）
-3. バックグラウンドで NotebookLM へCSVをアップロード → 動画生成 → MP4保存
+3. バックグラウンドで NotebookLM へソースをアップロード → 動画生成 → MP4 保存
 4. 完了/エラー時に `callback_url` へ Webhook 通知（指定した場合）
-5. 外部システムが `GET /api/v1/jobs/{id}/download` でMP4を取得
-
----
-
-## 実装済みファイル一覧
-
-| ファイル | 種別 | 概要 |
-|---------|------|------|
-| `backend/auth.py` | 新規 | APIキー認証（`X-API-Key` ヘッダー検証） |
-| `backend/webhook.py` | 新規 | Webhook通知（httpx、リトライ付き） |
-| `backend/api_v1.py` | 新規 | 外部API v1 ルーター（全エンドポイント定義） |
-| `backend/main.py` | 修正 | v1ルーター登録、CORS環境変数化、OpenAPI説明追加 |
-| `backend/runner.py` | 修正 | `callback_url` 引数追加、Webhook呼び出し統合 |
-| `backend/requirements.txt` | 修正 | `httpx` 追加 |
+5. 外部システムが `GET /api/v1/jobs/{id}/download` で MP4 を取得
 
 ---
 
 ## セットアップ
 
-### 1. 依存パッケージのインストール
+### 1. 環境変数の設定
 
 ```bash
-cd backend
-pip install -r requirements.txt
-```
-
-### 2. 環境変数の設定
-
-```bash
-# APIキーを設定（カンマ区切りで複数指定可）
+# API キーを設定（カンマ区切りで複数指定可）
 export NOTEVIDEO_API_KEYS=your_secret_key_here,another_key
 
-# CORS許可オリジンを追加する場合（デフォルト: localhost:3000）
+# CORS 許可オリジンを追加する場合（デフォルト: localhost:3000）
 export CORS_ALLOWED_ORIGINS=http://localhost:3000,https://your-external-system.example.com
 ```
 
 > **注意**: `NOTEVIDEO_API_KEYS` が未設定の場合、認証なしでアクセス可能になります（開発環境用）。本番環境では必ず設定してください。
 
-### 3. サーバー起動
+### 2. API ドキュメント
 
-```bash
-cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 4. APIドキュメント確認
-
-サーバー起動後、以下のURLでインタラクティブなAPIドキュメントを確認できます。
+サーバー起動後、以下の URL でインタラクティブな API ドキュメントを確認できます。
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
@@ -101,7 +71,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ## 認証
 
-外部API（`/api/v1/`）はすべてのリクエストに `X-API-Key` ヘッダーが必要です。
+外部 API（`/api/v1/`）はすべてのリクエストに `X-API-Key` ヘッダーが必要です。
 
 ```
 X-API-Key: your_secret_key_here
@@ -119,7 +89,7 @@ X-API-Key: your_secret_key_here
 
 ### POST `/api/v1/jobs` — ジョブ作成
 
-CSVファイルを送信して動画生成ジョブを作成します。
+Markdown（.md）または CSV ファイルを送信して動画生成ジョブを作成します。
 
 **リクエストヘッダー**
 
@@ -132,17 +102,17 @@ X-API-Key: <your-api-key>
 
 ```json
 {
-  "notebook_title": "CSV分析レポート",
-  "instructions": "CSVデータの主要な傾向と示唆を分かりやすく解説してください",
+  "notebook_title": "E-learningコンテンツ",
+  "instructions": "MarkdownドキュメントをわかりやすくAI動画解説してください",
   "style": "whiteboard",
   "format": "explainer",
   "language": "ja",
   "timeout": 1800,
-  "callback_url": "https://your-system/webhooks/notevideo",
-  "csv_files": [
+  "callback_url": "https://your-system/webhooks/mitene",
+  "source_files": [
     {
-      "filename": "data.csv",
-      "content_base64": "<Base64エンコードされたCSVの内容>"
+      "filename": "document.md",
+      "content_base64": "<Base64エンコードされたファイルの内容>"
     }
   ]
 }
@@ -152,21 +122,21 @@ X-API-Key: <your-api-key>
 
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `notebook_title` | string | `"CSV分析レポート"` | 生成するNotebookのタイトル |
-| `instructions` | string | `"CSVデータの...解説..."` | 動画の内容に関する指示 |
+| `notebook_title` | string | `"E-learningコンテンツ"` | 生成する Notebook のタイトル |
+| `instructions` | string | `"Markdownドキュメントを..."` | 動画の内容に関する指示 |
 | `style` | string | `"whiteboard"` | 動画スタイル（下表参照） |
 | `format` | string | `"explainer"` | 動画フォーマット（`explainer` / `brief`） |
 | `language` | string | `"ja"` | 生成言語（`ja` / `en` 等） |
 | `timeout` | integer | `1800` | タイムアウト秒数（最大待機時間） |
-| `callback_url` | string | `null` | 完了・エラー時のWebhook通知先URL（任意） |
-| `csv_files` | array | 必須 | CSVファイルの配列（1つ以上） |
+| `callback_url` | string | `null` | 完了・エラー時の Webhook 通知先 URL（任意） |
+| `source_files` | array | 必須 | ソースファイルの配列（1つ以上、.md または .csv） |
 
-**`csv_files` の各要素**
+**`source_files` の各要素**
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `filename` | string | ファイル名（`.csv` 拡張子必須） |
-| `content_base64` | string | CSVファイルをBase64エンコードした文字列 |
+| `filename` | string | ファイル名（`.md` または `.csv` 拡張子必須） |
+| `content_base64` | string | ファイルを Base64 エンコードした文字列 |
 | `file_path` | string | サーバー上の絶対パス（サーバーにファイルがある場合） |
 
 > `content_base64` または `file_path` のいずれか一方を必ず指定してください。
@@ -175,7 +145,7 @@ X-API-Key: <your-api-key>
 
 | 値 | 説明 |
 |----|------|
-| `auto` | AIが最適なスタイルを自動選択 |
+| `auto` | AI が最適なスタイルを自動選択 |
 | `classic` | シンプルで落ち着いたスタイル |
 | `whiteboard` | ホワイトボード風の手書き表現 |
 | `kawaii` | かわいらしいイラストスタイル |
@@ -190,9 +160,9 @@ X-API-Key: <your-api-key>
 ```json
 {
   "id": "job_a1b2c3d4e5f6",
-  "csvFileNames": "data.csv",
-  "notebookTitle": "CSV分析レポート",
-  "instructions": "CSVデータの主要な傾向と示唆を分かりやすく解説してください",
+  "sourceFileNames": "document.md",
+  "notebookTitle": "E-learningコンテンツ",
+  "instructions": "MarkdownドキュメントをわかりやすくAI動画解説してください",
   "style": "whiteboard",
   "format": "explainer",
   "language": "ja",
@@ -200,17 +170,17 @@ X-API-Key: <your-api-key>
   "status": "pending",
   "steps": [
     {"id": "create_notebook", "label": "ノートブック作成", "status": "pending"},
-    {"id": "add_source",      "label": "CSVソース追加",    "status": "pending"},
+    {"id": "add_source",      "label": "ドキュメント追加", "status": "pending"},
     {"id": "generate_video",  "label": "動画生成開始",     "status": "pending"},
     {"id": "wait_completion", "label": "生成完了待機",     "status": "pending"},
     {"id": "download_ready",  "label": "ダウンロード準備完了", "status": "pending"}
   ],
   "currentStep": null,
   "errorMessage": null,
-  "createdAt": "2026-03-04T10:00:00.000000+00:00",
-  "updatedAt": "2026-03-04T10:00:00.000000+00:00",
+  "createdAt": "2026-03-16T10:00:00.000000+00:00",
+  "updatedAt": "2026-03-16T10:00:00.000000+00:00",
   "completedAt": null,
-  "callbackUrl": "https://your-system/webhooks/notevideo"
+  "callbackUrl": "https://your-system/webhooks/mitene"
 }
 ```
 
@@ -223,10 +193,6 @@ X-API-Key: <your-api-key>
 | パラメータ | 説明 |
 |-----------|------|
 | `status` | フィルタ（`pending` / `processing` / `completed` / `error` / `all`） |
-
-```
-GET /api/v1/jobs?status=processing
-```
 
 ---
 
@@ -243,15 +209,6 @@ GET /api/v1/jobs?status=processing
 | `completed` | 完了（動画ダウンロード可能） |
 | `error` | エラー発生 |
 
-**`steps[].status` の値**
-
-| 値 | 説明 |
-|----|------|
-| `pending` | 未着手 |
-| `in_progress` | 実行中 |
-| `completed` | 完了 |
-| `error` | エラー |
-
 ---
 
 ### GET `/api/v1/jobs/{job_id}/download` — 動画ダウンロード
@@ -260,15 +217,16 @@ GET /api/v1/jobs?status=processing
 
 **レスポンス**
 
-- `200 OK` — `Content-Type: video/mp4` でMP4ファイルを返す
+- `200 OK` — `Content-Type: video/mp4` で MP4 ファイルを返す
+- `302 Found` — S3 が有効な場合は署名付き URL へリダイレクト
 - `400 Bad Request` — ジョブがまだ完了していない
-- `404 Not Found` — ジョブIDが存在しない、またはファイルが見つからない
+- `404 Not Found` — ジョブ ID が存在しない、またはファイルが見つからない
 
 ---
 
-## Webhook通知
+## Webhook 通知
 
-`callback_url` を指定した場合、ジョブが完了またはエラーになった時点で指定URLにPOSTリクエストを送信します。
+`callback_url` を指定した場合、ジョブが完了またはエラーになった時点で指定 URL に POST リクエストを送信します。
 
 **仕様**
 
@@ -276,9 +234,9 @@ GET /api/v1/jobs?status=processing
 |------|------|
 | メソッド | `POST` |
 | Content-Type | `application/json` |
-| タイムアウト | 10秒 |
-| リトライ回数 | 最大3回 |
-| リトライ間隔 | 5秒 → 15秒 → 45秒（指数バックオフ） |
+| タイムアウト | 10 秒 |
+| リトライ回数 | 最大 3 回 |
+| リトライ間隔 | 5 秒 → 15 秒 → 45 秒（指数バックオフ） |
 
 **完了時のペイロード**
 
@@ -287,7 +245,7 @@ GET /api/v1/jobs?status=processing
   "event": "job.completed",
   "job_id": "job_a1b2c3d4e5f6",
   "status": "completed",
-  "completed_at": "2026-03-04T10:30:00.000000+00:00"
+  "completed_at": "2026-03-16T10:30:00.000000+00:00"
 }
 ```
 
@@ -306,28 +264,28 @@ GET /api/v1/jobs?status=processing
 
 ## 利用例（cURL）
 
-### ステップ1: CSVをBase64エンコード
+### ステップ 1: ファイルを Base64 エンコード
 
 ```bash
-CSV_BASE64=$(base64 -i ./your_data.csv)
+FILE_BASE64=$(base64 -i ./document.md)
 ```
 
-### ステップ2: ジョブ作成
+### ステップ 2: ジョブ作成
 
 ```bash
 RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
   -H "X-API-Key: your_secret_key_here" \
   -H "Content-Type: application/json" \
   -d "{
-    \"notebook_title\": \"売上分析レポート 2026年3月\",
-    \"instructions\": \"月次売上の傾向と前月比較を解説してください\",
+    \"notebook_title\": \"社内ドキュメント解説\",
+    \"instructions\": \"内容をわかりやすく解説してください\",
     \"style\": \"whiteboard\",
     \"format\": \"explainer\",
     \"language\": \"ja\",
-    \"callback_url\": \"https://your-system/webhooks/notevideo\",
-    \"csv_files\": [{
-      \"filename\": \"sales_202603.csv\",
-      \"content_base64\": \"${CSV_BASE64}\"
+    \"callback_url\": \"https://your-system/webhooks/mitene\",
+    \"source_files\": [{
+      \"filename\": \"document.md\",
+      \"content_base64\": \"${FILE_BASE64}\"
     }]
   }")
 
@@ -335,7 +293,7 @@ JOB_ID=$(echo $RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdi
 echo "ジョブID: $JOB_ID"
 ```
 
-### ステップ3: ステータスをポーリング
+### ステップ 3: ステータスをポーリング
 
 ```bash
 while true; do
@@ -350,7 +308,7 @@ while true; do
 done
 ```
 
-### ステップ4: MP4をダウンロード
+### ステップ 4: MP4 をダウンロード
 
 ```bash
 curl -o output.mp4 http://localhost:8000/api/v1/jobs/$JOB_ID/download \
@@ -358,7 +316,7 @@ curl -o output.mp4 http://localhost:8000/api/v1/jobs/$JOB_ID/download \
 echo "ダウンロード完了: output.mp4"
 ```
 
-### Python利用例
+### Python 利用例
 
 ```python
 import base64
@@ -368,14 +326,14 @@ import httpx
 BASE_URL = "http://localhost:8000/api/v1"
 HEADERS = {"X-API-Key": "your_secret_key_here"}
 
-# CSVをBase64エンコード
-with open("data.csv", "rb") as f:
-    csv_b64 = base64.b64encode(f.read()).decode()
+# ファイルを Base64 エンコード
+with open("document.md", "rb") as f:
+    content_b64 = base64.b64encode(f.read()).decode()
 
 # ジョブ作成
 resp = httpx.post(f"{BASE_URL}/jobs", headers=HEADERS, json={
-    "notebook_title": "分析レポート",
-    "csv_files": [{"filename": "data.csv", "content_base64": csv_b64}],
+    "notebook_title": "社内ドキュメント解説",
+    "source_files": [{"filename": "document.md", "content_base64": content_b64}],
     "callback_url": "https://your-system/webhook",
 })
 resp.raise_for_status()
@@ -390,7 +348,7 @@ while True:
         break
     time.sleep(30)
 
-# MP4ダウンロード
+# MP4 ダウンロード
 if job["status"] == "completed":
     video = httpx.get(f"{BASE_URL}/jobs/{job_id}/download", headers=HEADERS)
     with open("output.mp4", "wb") as f:
@@ -402,240 +360,16 @@ else:
 
 ---
 
-## 音声解説API
+## フロントエンド API との関係
 
-CSVから音声解説（WAVファイル）を生成する外部APIです。Google NotebookLM の代わりに **Gemini API** を使用するため、`GEMINI_API_KEY` 環境変数が必要です。
+外部 API（`/api/v1/`）はフロントエンド用 API（`/api/`）と**完全に独立**しています。
 
-```
-外部システム
-  │
-  │  POST /api/v1/audio-jobs  (X-API-Key + JSON)
-  ▼
-FastAPI Backend  ─── バックグラウンド処理 ───►  Gemini LLM（解説原稿生成）
-  │                                               │
-  │  GET /api/v1/audio-jobs/{id}  (ポーリング)    │ Gemini TTS（音声生成）
-  ◄──────────────────────────────────────         │
-  │                                               │
-  │◄──── POST callback_url (Webhook通知) ─────────┘
-  │
-  │  GET /api/v1/audio-jobs/{id}/download
-  ▼
-WAVダウンロード
-```
-
-**処理ステップ**
-
-| ステップID | ラベル | 内容 |
+| | フロントエンド用 `/api/` | 外部 API `/api/v1/` |
 |---|---|---|
-| `read_csv` | CSV読み込み | アップロードされたCSVを読み込む |
-| `generate_script` | 解説原稿生成 | Gemini LLM（gemini-2.5-flash）で解説原稿テキストを生成 |
-| `generate_audio` | 音声生成 | Gemini TTS（gemini-2.5-flash-preview-tts）でWAV音声を生成 |
-| `download_ready` | ダウンロード準備完了 | WAVファイルを保存 |
-
-### POST `/api/v1/audio-jobs` — 音声ジョブ作成
-
-**リクエストヘッダー**
-
-```
-Content-Type: application/json
-X-API-Key: <your-api-key>
-```
-
-**リクエストボディ**
-
-```json
-{
-  "title": "売上解説レポート",
-  "instructions": "月次売上の傾向と前月比較を分かりやすく解説してください",
-  "voice_name": "Kore",
-  "language": "ja",
-  "timeout": 600,
-  "callback_url": "https://your-system/webhooks/notevideo-audio",
-  "csv_files": [
-    {
-      "filename": "sales.csv",
-      "content_base64": "<Base64エンコードされたCSVの内容>"
-    }
-  ]
-}
-```
-
-**パラメータ詳細**
-
-| フィールド | 型 | デフォルト | 説明 |
-|---|---|---|---|
-| `title` | string | `"CSV音声解説"` | 音声解説のタイトル |
-| `instructions` | string | `"CSVデータの...解説..."` | 解説内容に関する指示 |
-| `voice_name` | string | `"Kore"` | Gemini TTS のボイス名（下表参照） |
-| `language` | string | `"ja"` | 生成言語（`ja` / `en` 等） |
-| `timeout` | integer | `600` | タイムアウト秒数 |
-| `callback_url` | string | `null` | 完了・エラー時のWebhook通知先URL（任意） |
-| `csv_files` | array | 必須 | CSVファイルの配列（1つ以上） |
-
-**利用可能なボイス名**
-
-| 値 | 特徴 |
-|---|---|
-| `Kore` | 落ち着いたクリアな女性声（デフォルト） |
-| `Charon` | 低めで重厚な男性声 |
-| `Fenrir` | 力強い男性声 |
-| `Aoede` | 明るく柔らかい女性声 |
-| `Puck` | 軽快でエネルギッシュな声 |
-
-**レスポンス（201 Created）**
-
-```json
-{
-  "id": "job_a1b2c3d4e5f6",
-  "jobType": "audio",
-  "csvFileNames": "sales.csv",
-  "notebookTitle": "売上解説レポート",
-  "instructions": "月次売上の傾向と前月比較を分かりやすく解説してください",
-  "language": "ja",
-  "timeout": 600,
-  "voiceName": "Kore",
-  "generatedScript": null,
-  "status": "pending",
-  "steps": [
-    {"id": "read_csv",         "label": "CSV読み込み",       "status": "pending"},
-    {"id": "generate_script",  "label": "解説原稿生成",      "status": "pending"},
-    {"id": "generate_audio",   "label": "音声生成",          "status": "pending"},
-    {"id": "download_ready",   "label": "ダウンロード準備完了", "status": "pending"}
-  ],
-  "currentStep": null,
-  "errorMessage": null,
-  "createdAt": "2026-03-05T10:00:00.000000+00:00",
-  "updatedAt": "2026-03-05T10:00:00.000000+00:00",
-  "completedAt": null,
-  "callbackUrl": "https://your-system/webhooks/notevideo-audio"
-}
-```
-
----
-
-### GET `/api/v1/audio-jobs/{job_id}` — 音声ジョブ状態取得
-
-ポーリングで進捗を確認します。完了後は `generatedScript` に生成された解説原稿テキストが入ります。
-
-推奨ポーリング間隔: **10〜15秒**（音声生成は通常1〜3分で完了）
-
----
-
-### GET `/api/v1/audio-jobs/{job_id}/download` — 音声ダウンロード
-
-ジョブが `completed` 状態のときのみダウンロード可能です。
-
-**レスポンス**
-
-- `200 OK` — `Content-Type: audio/wav` でWAVファイルを返す
-- `302 Found` — S3 が有効な場合は署名付きURL（有効期限1時間）へリダイレクト
-- `400 Bad Request` — ジョブがまだ完了していない
-- `404 Not Found` — ジョブIDが存在しない、またはファイルが見つからない
-
----
-
-### 利用例（cURL）
-
-```bash
-# ステップ1: CSVをBase64エンコード
-CSV_BASE64=$(base64 -i ./sales.csv)
-
-# ステップ2: 音声ジョブ作成
-RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/audio-jobs \
-  -H "X-API-Key: your_secret_key_here" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"売上解説レポート\",
-    \"instructions\": \"月次売上の傾向を解説してください\",
-    \"voice_name\": \"Kore\",
-    \"language\": \"ja\",
-    \"callback_url\": \"https://your-system/webhooks/notevideo-audio\",
-    \"csv_files\": [{
-      \"filename\": \"sales.csv\",
-      \"content_base64\": \"${CSV_BASE64}\"
-    }]
-  }")
-
-JOB_ID=$(echo $RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
-echo "ジョブID: $JOB_ID"
-
-# ステップ3: ステータスをポーリング
-while true; do
-  STATUS=$(curl -s http://localhost:8000/api/v1/audio-jobs/$JOB_ID \
-    -H "X-API-Key: your_secret_key_here" \
-    | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")
-  echo "ステータス: $STATUS"
-  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "error" ]; then
-    break
-  fi
-  sleep 15
-done
-
-# ステップ4: WAVをダウンロード
-curl -o output.wav http://localhost:8000/api/v1/audio-jobs/$JOB_ID/download \
-  -H "X-API-Key: your_secret_key_here"
-echo "ダウンロード完了: output.wav"
-```
-
-### Python利用例
-
-```python
-import base64
-import time
-import httpx
-
-BASE_URL = "http://localhost:8000/api/v1"
-HEADERS = {"X-API-Key": "your_secret_key_here"}
-
-# CSVをBase64エンコード
-with open("sales.csv", "rb") as f:
-    csv_b64 = base64.b64encode(f.read()).decode()
-
-# 音声ジョブ作成
-resp = httpx.post(f"{BASE_URL}/audio-jobs", headers=HEADERS, json={
-    "title": "売上解説レポート",
-    "instructions": "月次売上の傾向を解説してください",
-    "voice_name": "Kore",
-    "language": "ja",
-    "csv_files": [{"filename": "sales.csv", "content_base64": csv_b64}],
-    "callback_url": "https://your-system/webhook",
-})
-resp.raise_for_status()
-job_id = resp.json()["id"]
-print(f"ジョブ作成: {job_id}")
-
-# ポーリングで完了を待つ
-while True:
-    job = httpx.get(f"{BASE_URL}/audio-jobs/{job_id}", headers=HEADERS).json()
-    print(f"ステータス: {job['status']} / ステップ: {job['currentStep']}")
-    if job["status"] in ("completed", "error"):
-        break
-    time.sleep(15)
-
-# WAVダウンロード & 生成原稿表示
-if job["status"] == "completed":
-    audio = httpx.get(f"{BASE_URL}/audio-jobs/{job_id}/download", headers=HEADERS)
-    with open("output.wav", "wb") as f:
-        f.write(audio.content)
-    print("音声保存完了: output.wav")
-    print(f"生成原稿:\n{job['generatedScript']}")
-else:
-    print(f"エラー: {job['errorMessage']}")
-```
-
----
-
-## 既存フロントエンドAPIとの共存
-
-外部API（`/api/v1/`）は既存のフロントエンド用API（`/api/`）と**完全に独立**しています。
-
-| | フロントエンド用 `/api/` | 外部API `/api/v1/` |
-|---|---|---|
-| 認証 | なし | `X-API-Key` ヘッダー必須 |
-| CSVの渡し方 | `multipart/form-data` | JSON（Base64 or サーバーパス） |
+| 認証 | GitHub OAuth / Cookie | `X-API-Key` ヘッダー必須 |
+| ソースの渡し方 | Wiki 同期・管理画面 | JSON（Base64 またはサーバーパス） |
 | Webhook | なし | `callback_url` で指定可 |
-| 動画生成 | `POST /api/jobs` | `POST /api/v1/jobs` |
-| 音声生成 | `POST /api/audio-jobs` | `POST /api/v1/audio-jobs` |
-| 対象 | ブラウザUI | 外部システム・スクリプト |
+| 動画生成 | Wiki 同期・管理画面 | `POST /api/v1/jobs` |
+| 対象 | ブラウザ UI | 外部システム・スクリプト |
 
-既存のフロントエンド動作に影響はありません。ジョブストアは共通のため、フロントエンドUI上でも外部APIから作成したジョブを確認できます。
+ジョブストアは共通のため、フロントエンド UI 上でも外部 API から作成したジョブを確認できます。

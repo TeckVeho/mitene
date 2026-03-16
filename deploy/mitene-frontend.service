@@ -1,0 +1,25 @@
+# mitene フロントエンド systemd サービス定義
+# /etc/systemd/system/mitene-frontend.service に配置する
+#
+# 登録・起動手順:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable mitene-frontend
+#   sudo systemctl start mitene-frontend
+
+[Unit]
+Description=mitene Frontend (Next.js)
+After=network.target mitene-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/mitene/frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/bin/node /opt/mitene/frontend/.next/standalone/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

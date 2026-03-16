@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# mitene フロントエンド
 
-## Getting Started
+E-learning プラットフォーム「mitene」の Next.js フロントエンドです。
 
-First, run the development server:
+## 技術スタック
+
+- **Next.js 14** (App Router)
+- **React**
+- **Tailwind CSS**
+
+## 開発
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 で起動します。バックエンドは `http://localhost:8000` で動作している必要があります。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 環境変数
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| 変数 | 説明 |
+|------|------|
+| `NEXT_PUBLIC_API_URL` | バックエンド API のベース URL（例: `http://localhost:8000`） |
 
-## Learn More
+`.env.production.example` を参考に `.env.local` を作成してください。
 
-To learn more about Next.js, take a look at the following resources:
+## 主なページ
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| パス | 説明 |
+|------|------|
+| `/` | トップ（動画一覧・カテゴリ） |
+| `/videos/[id]` | 動画再生・詳細 |
+| `/history` | 視聴履歴 |
+| `/watch-later` | あとで見る |
+| `/liked` | いいねした動画 |
+| `/jobs` | ジョブ一覧 |
+| `/jobs/[id]` | ジョブ詳細 |
+| `/new` | 新規コンテンツ作成 |
+| `/admin` | 管理画面（記事・動画状況） |
+| `/settings` | 設定（API キー等） |
+| `/login` | GitHub OAuth ログイン |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## ビルド
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run build
+npm start
+```

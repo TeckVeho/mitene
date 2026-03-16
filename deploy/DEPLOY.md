@@ -1,11 +1,11 @@
-# NoteVideo AWS デプロイ手順書
+# mitene (V-learning) AWS デプロイ手順書
 
 ## 0. GitHub へのプッシュ（初回のみ）
 
-プロジェクトルート（`notebooklm-csv-to-video/`）に Git リポジトリを作成して push します。
+プロジェクトルート（`mitene/`）に Git リポジトリを作成して push します。
 
 ```bash
-cd /path/to/notebooklm-csv-to-video
+cd /path/to/mitene
 
 # frontend/ に別途 .git ディレクトリが存在する場合は削除してから push する
 # （サブモジュール扱いを避けるため）
@@ -15,7 +15,7 @@ git init
 git add .
 git commit -m "initial commit"
 git branch -M main
-git remote add origin https://github.com/{org}/{repo}.git
+git remote add origin https://github.com/TeckVeho/mitene.git
 git push -u origin main
 ```
 
@@ -37,7 +37,7 @@ git push -u origin main
 ### 1-1. S3 バケット
 
 1. AWS コンソール → S3 → 「バケットを作成」
-2. **バケット名**: `notevideo-files-prod`（任意、`.env` と合わせること）
+2. **バケット名**: `mitene-files-prod`（任意、`.env` と合わせること）
 3. **リージョン**: `ap-northeast-1`（東京）
 4. **パブリックアクセス**: すべてブロック（デフォルトのまま）
 5. その他はデフォルト設定で作成
@@ -49,13 +49,13 @@ git push -u origin main
    - **エンジン**: MySQL 8.0 以上（または Amazon Aurora MySQL 互換）
    - **テンプレート**: 本番稼働用（または 開発/テスト）
    - **DB インスタンスクラス**: `db.t3.micro`（小規模の場合）
-   - **DB インスタンス識別子**: `notevideo-db`
-   - **マスターユーザー名**: `notevideo`
-   - **マスターパスワード**: 安全なパスワードを設定
-   - **最初のデータベース名**: `notevideo`
+  - **DB インスタンス識別子**: `mitene-db`
+  - **マスターユーザー名**: `mitene`
+  - **マスターパスワード**: 安全なパスワードを設定
+  - **最初のデータベース名**: `mitene`
    - **パブリックアクセス**: なし
 3. VPC セキュリティグループ: EC2 のセキュリティグループからポート 3306 を許可
-4. 作成後、エンドポイント（例: `notevideo-db.xxxx.ap-northeast-1.rds.amazonaws.com`）を控えておく
+4. 作成後、エンドポイント（例: `mitene-db.xxxx.ap-northeast-1.rds.amazonaws.com`）を控えておく
 
 ### 1-3. IAM ロール
 
@@ -63,7 +63,7 @@ git push -u origin main
 2. **信頼されたエンティティ**: AWS のサービス → EC2
 3. **ポリシーを作成**: `deploy/iam_policy.json` の内容を貼り付ける
    - バケット名は実際の名前に変更すること
-4. ロール名: `NoteVideoEC2Role`
+4. ロール名: `MiteneEC2Role`
 
 ### 1-4. EC2 インスタンス
 
@@ -73,7 +73,7 @@ git push -u origin main
    - **インスタンスタイプ**: `t3.medium`（Playwright + Chromium 動作のため）
    - **ストレージ**: 30GB gp3
    - **セキュリティグループ**: 22（SSH）・80（HTTP）・443（HTTPS）を開放
-   - **IAM インスタンスプロファイル**: `NoteVideoEC2Role`（手順 1-3 で作成）
+   - **IAM インスタンスプロファイル**: `MiteneEC2Role`（手順 1-3 で作成）
 3. ElasticIP を割り当て、ドメインの DNS に A レコードを設定する
 
 ---
@@ -104,8 +104,8 @@ sudo apt install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
   libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
 
 # リポジトリのクローン
-sudo git clone https://github.com/{org}/{repo}.git /opt/notevideo
-sudo chown -R ubuntu:ubuntu /opt/notevideo
+sudo git clone https://github.com/TeckVeho/mitene.git /opt/mitene
+sudo chown -R ubuntu:ubuntu /opt/mitene
 ```
 
 ---
@@ -115,7 +115,7 @@ sudo chown -R ubuntu:ubuntu /opt/notevideo
 ### 3-1. バックエンドのセットアップ
 
 ```bash
-cd /opt/notevideo/backend
+cd /opt/mitene/backend
 
 # Python 仮想環境
 python3.12 -m venv .venv
@@ -132,26 +132,30 @@ playwright install-deps chromium
 
 ```bash
 # サンプルからコピー
-cp /opt/notevideo/backend/.env.example /opt/notevideo/backend/.env
+cp /opt/mitene/backend/.env.example /opt/mitene/backend/.env
 
 # 実際の値を編集
-nano /opt/notevideo/backend/.env
+nano /opt/mitene/backend/.env
 ```
 
 以下の値を設定する:
 
 ```env
 AWS_REGION=ap-northeast-1
-S3_BUCKET_NAME=notevideo-files-prod
-DATABASE_URL=mysql://notevideo:{パスワード}@{RDSエンドポイント}:3306/notevideo
+S3_BUCKET_NAME=mitene-files-prod
+DATABASE_URL=mysql://mitene:{パスワード}@{RDSエンドポイント}:3306/mitene
 NOTEVIDEO_API_KEYS={任意のAPIキー}
 CORS_ALLOWED_ORIGINS=https://{ドメイン名}
+FRONTEND_URL=https://{ドメイン名}
+API_BASE_URL=https://{ドメイン名}
+GITHUB_CLIENT_ID={GitHub OAuth App の Client ID}
+GITHUB_CLIENT_SECRET={GitHub OAuth App の Client Secret}
 ```
 
 ### 3-3. フロントエンドのビルド
 
 ```bash
-cd /opt/notevideo/frontend
+cd /opt/mitene/frontend
 
 # 本番用環境変数
 cp .env.production.example .env.production
@@ -165,21 +169,21 @@ npm run build
 ### 3-4. systemd サービスの登録
 
 ```bash
-sudo cp /opt/notevideo/deploy/notevideo-backend.service /etc/systemd/system/
-sudo cp /opt/notevideo/deploy/notevideo-frontend.service /etc/systemd/system/
+sudo cp /opt/mitene/deploy/mitene-backend.service /etc/systemd/system/
+sudo cp /opt/mitene/deploy/mitene-frontend.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable notevideo-backend notevideo-frontend
-sudo systemctl start notevideo-backend
-sudo systemctl start notevideo-frontend
+sudo systemctl enable mitene-backend mitene-frontend
+sudo systemctl start mitene-backend
+sudo systemctl start mitene-frontend
 ```
 
 ### 3-5. Nginx の設定
 
 ```bash
 # ドメイン名を置き換えてコピー
-sudo sed 's/{ドメイン名}/your-domain.com/g' /opt/notevideo/deploy/nginx.conf \
-  > /etc/nginx/sites-available/notevideo
-sudo ln -sf /etc/nginx/sites-available/notevideo /etc/nginx/sites-enabled/notevideo
+sudo sed 's/{ドメイン名}/your-domain.com/g' /opt/mitene/deploy/nginx.conf \
+  > /etc/nginx/sites-available/mitene
+sudo ln -sf /etc/nginx/sites-available/mitene /etc/nginx/sites-enabled/mitene
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 
@@ -190,9 +194,15 @@ sudo certbot --nginx -d your-domain.com
 sudo systemctl restart nginx
 ```
 
+### 3-6. GitHub OAuth 設定（ログイン用）
+
+1. [GitHub Developer Settings](https://github.com/settings/developers) で OAuth App を作成
+2. **Authorization callback URL**: `https://{ドメイン名}/api/auth/github/callback`
+3. 発行された Client ID と Client Secret を `.env` の `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` に設定
+
 ---
 
-## 4. Google NotebookLM 認証（重要）
+## 4. Google NotebookLM 認証（動画生成用）
 
 本サービスは `notebooklm-py` 経由で Google NotebookLM を操作するため、
 **EC2 上で Google アカウントにログインする必要があります。**
@@ -203,7 +213,7 @@ sudo systemctl restart nginx
 
 ```bash
 # EC2 に SSH でログイン中に実行
-source /opt/notevideo/backend/.venv/bin/activate
+source /opt/mitene/backend/.venv/bin/activate
 notebooklm login
 ```
 
@@ -253,7 +263,7 @@ Google のセッションは定期的に期限切れになります。
 ## 6. 更新デプロイ手順（コード更新時）
 
 ```bash
-cd /opt/notevideo
+cd /opt/mitene
 git pull
 
 # バックエンド: 依存関係に変更がある場合
@@ -264,7 +274,7 @@ pip install -r backend/requirements.txt
 cd frontend && npm ci && npm run build
 
 # サービス再起動
-sudo systemctl restart notevideo-backend notevideo-frontend
+sudo systemctl restart mitene-backend mitene-frontend
 ```
 
 ---
@@ -273,10 +283,10 @@ sudo systemctl restart notevideo-backend notevideo-frontend
 
 ```bash
 # バックエンドログ
-sudo journalctl -u notevideo-backend -f --since "1 hour ago"
+sudo journalctl -u mitene-backend -f --since "1 hour ago"
 
 # フロントエンドログ
-sudo journalctl -u notevideo-frontend -f
+sudo journalctl -u mitene-frontend -f
 
 # Nginx アクセスログ
 sudo tail -f /var/log/nginx/access.log
