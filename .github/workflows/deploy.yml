@@ -39,6 +39,7 @@ jobs:
           rsync -rzu --delete \
             --exclude='.env' \
             --exclude='.venv' \
+            --exclude='ecosystem.config.js' \
             ./ $USER@$HOST:$DEPLOY_PATH
           ssh $USER@$HOST "
             cd $DEPLOY_PATH &&
@@ -86,6 +87,7 @@ jobs:
           ssh $USER@$HOST "mkdir -p $DEPLOY_PATH"
           rsync -rzu --delete \
             --exclude='.env' \
+            --exclude='ecosystem.config.js' \
             ./ $USER@$HOST:$DEPLOY_PATH
           ssh $USER@$HOST "
             cd $DEPLOY_PATH &&

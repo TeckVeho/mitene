@@ -23,6 +23,9 @@ env/
 .env.*.local
 backend/.env
 
+# PM2 config (tự config trên server, tham khảo file .example)
+**/ecosystem.config.js
+
 # Backend runtime directories
 backend/uploads/
 backend/outputs/
