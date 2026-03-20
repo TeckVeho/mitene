@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path as _Path
 
 from dotenv import load_dotenv
@@ -842,18 +843,52 @@ async def trigger_wiki_sync_directory(background_tasks: BackgroundTasks, path: s
     """指定ディレクトリ配下の .md ファイルのみを同期し、動画生成を実行する"""
     from wiki_sync import sync_wiki_from_directory
 
-    async def _do_sync():
-        result = await sync_wiki_from_directory(
-            relative_dir=path,
-            store_update_fn=database.store_update,
-            run_job_fn=run_job,
-            semaphore=_job_semaphore,
-            outputs_dir=OUTPUTS_DIR,
-        )
-        logger.info("Wiki ディレクトリ同期結果: %s", result)
+    sync_id = f"sync_{uuid.uuid4().hex[:8]}"
+    logger.info(
+        "Wiki sync request received sync_id=%s path=%s",
+        sync_id,
+        path or "(root)",
+    )
 
+    async def _do_sync():
+        logger.info(
+            "Wiki sync background task started sync_id=%s path=%s",
+            sync_id,
+            path or "(root)",
+        )
+        try:
+            result = await sync_wiki_from_directory(
+                relative_dir=path,
+                store_update_fn=database.store_update,
+                run_job_fn=run_job,
+                semaphore=_job_semaphore,
+                outputs_dir=OUTPUTS_DIR,
+                sync_id=sync_id,
+            )
+            logger.info(
+                "Wiki sync background task finished sync_id=%s status=%s processed=%s jobs_created=%s hash=%s result=%s",
+                sync_id,
+                result.get("status"),
+                result.get("processed"),
+                result.get("jobs_created"),
+                result.get("hash"),
+                result,
+            )
+        except Exception:
+            logger.exception(
+                "Wiki sync background task crashed sync_id=%s path=%s",
+                sync_id,
+                path or "(root)",
+            )
+            raise
+
+    logger.info(
+        "Wiki sync background task scheduled sync_id=%s path=%s",
+        sync_id,
+        path or "(root)",
+    )
     background_tasks.add_task(_do_sync)
-    return {"message": "ディレクトリの動画作成を開始しました"}
+    return {"message": "ディレクトリの動画作成を開始しました", "sync_id": sync_id}
 
 
 @app.get("/api/wiki/sync-status")
