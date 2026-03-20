@@ -3,8 +3,10 @@ description: Setup SSH agent and known hosts
 
 inputs:
   ssh_key:
+    description: Private SSH key used by ssh-agent
     required: true
   host:
+    description: SSH host name or IP for known_hosts
     required: true
 
 runs:
@@ -15,6 +17,33 @@ runs:
         ssh-private-key: ${{ inputs.ssh_key }}
 
     - shell: bash
+      env:
+        SSH_HOST: ${{ inputs.host }}
       run: |
+        set -euo pipefail
+
+        if [ -z "${SSH_HOST:-}" ]; then
+          echo "::error::Input 'host' is empty. Please set secrets.SSH_HOST."
+          exit 1
+        fi
+
         mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ inputs.host }} 2>/dev/null >> ~/.ssh/known_hosts
+        chmod 700 ~/.ssh
+
+        if ssh-keygen -F "$SSH_HOST" > /dev/null 2>&1; then
+          echo "SSH host key already exists in known_hosts: $SSH_HOST"
+          exit 0
+        fi
+
+        echo "Scanning SSH host key for: $SSH_HOST"
+        for attempt in 1 2 3; do
+          if ssh-keyscan -T 10 -H "$SSH_HOST" >> ~/.ssh/known_hosts; then
+            echo "Added SSH host key to known_hosts: $SSH_HOST"
+            exit 0
+          fi
+          echo "ssh-keyscan failed (attempt $attempt/3) for host '$SSH_HOST'."
+          sleep 2
+        done
+
+        echo "::error::Failed to fetch SSH host key from '$SSH_HOST' after 3 attempts. Check DNS/network/firewall and secrets.SSH_HOST."
+        exit 1
