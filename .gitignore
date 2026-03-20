@@ -38,6 +38,9 @@ frontend/.env
 
 # NotebookLM session
 .notebooklm/
+storage_state.json
+
+backend/wiki-repo/
 
 # macOS
 .DS_Store
