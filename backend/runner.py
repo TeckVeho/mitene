@@ -119,6 +119,16 @@ async def run_job(
     # 後方互換: csv_paths が渡された場合は source_paths として扱う
     if source_paths is None:
         source_paths = csv_paths or []
+    logger.info(
+        "run_job started job_id=%s source_count=%d language=%s style=%s format=%s timeout=%s output_path=%s",
+        job_id,
+        len(source_paths),
+        language,
+        style,
+        video_format,
+        timeout,
+        output_path,
+    )
 
     if semaphore is not None:
         await semaphore.acquire()
@@ -164,25 +174,51 @@ async def run_job(
         async with await NotebookLMClient.from_storage() as client:
 
             # ── Step 1: ノートブック作成 ──────────────────────────────
+            logger.info("run_job step start job_id=%s step=create_notebook", job_id)
             steps = await _set_step_status(
                 store_update, job_id, steps, "create_notebook", "in_progress"
             )
             nb = await client.notebooks.create(notebook_title)
+            logger.info(
+                "run_job step success job_id=%s step=create_notebook notebook_id=%s title=%s",
+                job_id,
+                nb.id,
+                notebook_title,
+            )
             steps = await _set_step_status(
                 store_update, job_id, steps, "create_notebook", "completed"
             )
 
             # ── Step 2: ソース追加 ────────────────────────────────────
+            logger.info(
+                "run_job step start job_id=%s step=add_source total_sources=%d",
+                job_id,
+                len(source_paths),
+            )
             total = len(source_paths)
             for idx, source_path in enumerate(source_paths, start=1):
                 progress = f"({idx}/{total})" if total > 1 else ""
                 ext = source_path.suffix.lower()
                 file_type = "Markdown" if ext == ".md" else "CSV"
+                logger.info(
+                    "run_job add_source uploading job_id=%s source=%s index=%d/%d type=%s",
+                    job_id,
+                    source_path,
+                    idx,
+                    total,
+                    file_type,
+                )
                 steps = await _set_step_status(
                     store_update, job_id, steps, "add_source", "in_progress",
                     message=f"{file_type}ファイルをアップロード中... {progress}"
                 )
                 source = await client.sources.add_file(nb.id, source_path)
+                logger.debug(
+                    "run_job add_source uploaded job_id=%s source_id=%s source=%s",
+                    job_id,
+                    source.id,
+                    source_path,
+                )
 
                 steps = await _set_step_status(
                     store_update, job_id, steps, "add_source", "in_progress",
@@ -192,6 +228,12 @@ async def run_job(
                     client, nb.id, source.id, source_path.name
                 )
                 if not ready:
+                    logger.error(
+                        "run_job add_source timeout job_id=%s source_id=%s source=%s",
+                        job_id,
+                        source.id,
+                        source_path.name,
+                    )
                     error_msg = (
                         f"{source_path.name} のインデックス作成がタイムアウトしました。"
                         "ファイルのサイズを確認してください。"
@@ -203,12 +245,20 @@ async def run_job(
                             {"event": "job.error", "job_id": job_id, "status": "error", "error_message": error_msg},
                         )
                     return
+                logger.info(
+                    "run_job add_source ready job_id=%s source_id=%s source=%s",
+                    job_id,
+                    source.id,
+                    source_path.name,
+                )
 
             steps = await _set_step_status(
                 store_update, job_id, steps, "add_source", "completed"
             )
+            logger.info("run_job step success job_id=%s step=add_source", job_id)
 
             # ── Step 3: 解説動画を生成 ────────────────────────────────
+            logger.info("run_job step start job_id=%s step=generate_video", job_id)
             steps = await _set_step_status(
                 store_update, job_id, steps, "generate_video", "in_progress",
                 message=f"動画生成を開始中... (指示: {instructions[:30]}{'...' if len(instructions) > 30 else ''})"
@@ -220,11 +270,22 @@ async def run_job(
                 video_style=video_style,
                 language=language,
             )
+            logger.info(
+                "run_job step success job_id=%s step=generate_video task_id=%s",
+                job_id,
+                gen_status.task_id,
+            )
             steps = await _set_step_status(
                 store_update, job_id, steps, "generate_video", "completed"
             )
 
             # ── Step 4: 生成完了まで待機 ──────────────────────────────
+            logger.info(
+                "run_job step start job_id=%s step=wait_completion task_id=%s timeout=%s",
+                job_id,
+                gen_status.task_id,
+                timeout,
+            )
             steps = await _set_step_status(
                 store_update, job_id, steps, "wait_completion", "in_progress",
                 message=f"動画を生成中... (最大 {timeout // 60} 分)"
@@ -237,6 +298,11 @@ async def run_job(
             )
 
             if not final.is_complete:
+                logger.error(
+                    "run_job step failed job_id=%s step=wait_completion final_status=%s",
+                    job_id,
+                    final.status,
+                )
                 error_msg = f"動画生成がタイムアウトまたは失敗しました。(ステータス: {final.status})"
                 await _fail_job(store_update, job_id, steps, "wait_completion", error_msg)
                 if callback_url:
@@ -249,15 +315,36 @@ async def run_job(
             steps = await _set_step_status(
                 store_update, job_id, steps, "wait_completion", "completed"
             )
+            logger.info(
+                "run_job step success job_id=%s step=wait_completion final_status=%s",
+                job_id,
+                final.status,
+            )
 
             # ── Step 5: MP4 ダウンロード ──────────────────────────────
+            logger.info(
+                "run_job step start job_id=%s step=download_ready output_path=%s",
+                job_id,
+                output_path,
+            )
             steps = await _set_step_status(
                 store_update, job_id, steps, "download_ready", "in_progress",
                 message="MP4ファイルをダウンロード中..."
             )
             await client.artifacts.download_video(nb.id, str(output_path))
+            logger.info(
+                "run_job video downloaded job_id=%s notebook_id=%s output_path=%s",
+                job_id,
+                nb.id,
+                output_path,
+            )
 
             if storage_mod.is_s3_enabled():
+                logger.info(
+                    "run_job s3 upload start job_id=%s output_path=%s",
+                    job_id,
+                    output_path,
+                )
                 steps = await _set_step_status(
                     store_update, job_id, steps, "download_ready", "in_progress",
                     message="MP4 を S3 にアップロード中..."
@@ -265,10 +352,12 @@ async def run_job(
                 await asyncio.get_event_loop().run_in_executor(
                     None, storage_mod.upload_mp4_to_s3, job_id, output_path
                 )
+                logger.info("run_job s3 upload success job_id=%s", job_id)
 
             steps = await _set_step_status(
                 store_update, job_id, steps, "download_ready", "completed"
             )
+            logger.info("run_job step success job_id=%s step=download_ready", job_id)
 
         # ローカル一時ファイルを削除
         storage_mod.cleanup_local_csv(source_paths)
@@ -281,6 +370,7 @@ async def run_job(
             steps=steps,
             completedAt=completed_at,
         )
+        logger.info("run_job completed job_id=%s completed_at=%s", job_id, completed_at)
 
         # ── Step 6: videos テーブルを更新 + Slack 通知 ────────────
         await _on_job_completed(job_id, notebook_title)

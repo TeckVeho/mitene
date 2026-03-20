@@ -211,6 +211,28 @@ def _filter_md_files_by_directory(md_files: list[str], relative_dir: str) -> lis
     return [f for f in md_files if f.startswith(prefix) and f.endswith(".md")]
 
 
+def _normalize_sync_path(path_value: str) -> str:
+    """sync API の path を正規化する（先頭/末尾の余分な区切りを除去）。"""
+    if not path_value:
+        return ""
+    normalized = path_value.strip().replace("\\", "/")
+    normalized = normalized.lstrip("/")
+    if normalized != ".":
+        normalized = normalized.rstrip("/")
+    return "" if normalized == "." else normalized
+
+
+def _resolve_target_md_files(md_files: list[str], path_input: str) -> tuple[list[str], str]:
+    """
+    path_input から対象 .md ファイルを解決する。
+    戻り値: (target_files, mode) where mode is "directory" or "single_file"
+    """
+    normalized = _normalize_sync_path(path_input)
+    if normalized.endswith(".md"):
+        return ([normalized] if normalized in md_files else []), "single_file"
+    return _filter_md_files_by_directory(md_files, normalized), "directory"
+
+
 def get_wiki_directories() -> list[dict]:
     """
     リポジトリ内の .md を含むディレクトリ一覧を返す。
@@ -250,14 +272,20 @@ async def sync_wiki_from_directory(
     run_job_fn=None,
     semaphore=None,
     outputs_dir: Optional[Path] = None,
+    sync_id: Optional[str] = None,
 ) -> dict:
     """
-    指定ディレクトリ配下の .md ファイルのみを同期し、動画生成ジョブを投入する。
-    relative_dir: "" でルート、"security" で security/ 配下など。
+    指定 path 配下の .md ファイルを同期し、動画生成ジョブを投入する。
+    relative_dir はディレクトリまたは .md ファイルの相対 path を受け取る。
     """
     import database as db
 
     if _sync_status["is_syncing"]:
+        logger.warning(
+            "Wiki sync skipped because another sync is running sync_id=%s relative_dir=%s",
+            sync_id,
+            relative_dir or "(root)",
+        )
         return {"status": "already_running", "message": "同期が既に実行中です"}
 
     _sync_status["is_syncing"] = True
@@ -265,27 +293,74 @@ async def sync_wiki_from_directory(
 
     try:
         local_path = os.path.abspath(WIKI_GIT_LOCAL_PATH)
+        normalized_path = _normalize_sync_path(relative_dir)
+        logger.info(
+            "Wiki sync started sync_id=%s relative_dir=%s local_path=%s branch=%s has_repo_url=%s",
+            sync_id,
+            normalized_path or "(root)",
+            local_path,
+            WIKI_GIT_BRANCH,
+            bool(WIKI_GIT_REPO_URL),
+        )
         success, new_hash = _clone_or_pull(WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH)
+        logger.info(
+            "Wiki sync git step finished sync_id=%s success=%s hash=%s",
+            sync_id,
+            success,
+            new_hash,
+        )
 
         if not success and not Path(local_path).exists():
             msg = f"Wiki リポジトリが見つかりません: {local_path}"
             _sync_status["error"] = msg
             _sync_status["is_syncing"] = False
+            logger.error("Wiki sync failed sync_id=%s message=%s", sync_id, msg)
             return {"status": "error", "message": msg}
 
         if not Path(local_path).exists():
             _sync_status["is_syncing"] = False
+            logger.warning("Wiki sync skipped sync_id=%s reason=repo_not_found", sync_id)
             return {"status": "skipped", "message": "リポジトリが存在しません"}
 
         all_md = _get_all_md_files(local_path)
-        target_files = _filter_md_files_by_directory(all_md, relative_dir or "")
+        target_files, sync_mode = _resolve_target_md_files(all_md, normalized_path)
+        logger.info(
+            "Wiki sync file discovery sync_id=%s mode=%s total_md=%d matched_md=%d path=%s",
+            sync_id,
+            sync_mode,
+            len(all_md),
+            len(target_files),
+            normalized_path or "(root)",
+        )
+        if target_files:
+            logger.debug(
+                "Wiki sync sample files sync_id=%s files=%s",
+                sync_id,
+                target_files[:5],
+            )
 
         if not target_files:
             _sync_status["is_syncing"] = False
-            dir_label = "ルート" if not relative_dir else relative_dir
-            return {"status": "no_files", "message": f"{dir_label} に .md ファイルがありません"}
+            dir_label = "ルート" if not normalized_path else normalized_path
+            logger.warning(
+                "Wiki sync no markdown files sync_id=%s mode=%s path=%s",
+                sync_id,
+                sync_mode,
+                dir_label,
+            )
+            return {
+                "status": "no_files",
+                "message": f"{dir_label} に .md ファイルがありません",
+                "mode": sync_mode,
+            }
 
-        logger.info("ディレクトリ %s の .md ファイル: %d 件", relative_dir or "ルート", len(target_files))
+        logger.info(
+            "Wiki sync processing started sync_id=%s mode=%s path=%s md_count=%d",
+            sync_id,
+            sync_mode,
+            normalized_path or "ルート",
+            len(target_files),
+        )
 
         processed = 0
         jobs_created = 0
@@ -293,15 +368,28 @@ async def sync_wiki_from_directory(
         for rel_path in target_files:
             full_path = Path(local_path) / rel_path
             if not full_path.exists():
+                logger.warning(
+                    "Wiki sync file missing sync_id=%s rel_path=%s",
+                    sync_id,
+                    rel_path,
+                )
                 continue
 
             try:
+                logger.info("Wiki sync file start sync_id=%s rel_path=%s", sync_id, rel_path)
                 content = full_path.read_text(encoding="utf-8", errors="replace")
                 title = _extract_title(content, rel_path)
                 cat_slug, cat_name = _infer_category(rel_path)
 
                 cat = await db.upsert_category(cat_slug, cat_name)
                 cat_id = cat["id"]
+                logger.debug(
+                    "Wiki sync category upserted sync_id=%s rel_path=%s category_id=%s slug=%s",
+                    sync_id,
+                    rel_path,
+                    cat_id,
+                    cat_slug,
+                )
 
                 article = await db.upsert_article(
                     git_path=rel_path,
@@ -309,6 +397,13 @@ async def sync_wiki_from_directory(
                     content_md=content,
                     git_hash=new_hash or "unknown",
                     category_id=cat_id,
+                )
+                logger.info(
+                    "Wiki sync article upserted sync_id=%s rel_path=%s article_id=%s title=%s",
+                    sync_id,
+                    rel_path,
+                    article.get("id"),
+                    title,
                 )
                 processed += 1
 
@@ -336,6 +431,14 @@ async def sync_wiki_from_directory(
                         local_md_path = uploads_dir / f"{job_id}_{md_filename}"
                         local_md_path.write_bytes(full_path.read_bytes())
                         output_path = outputs_dir / f"{job_id}.mp4"
+                        logger.info(
+                            "Wiki sync creating job sync_id=%s rel_path=%s lang=%s job_id=%s output_path=%s",
+                            sync_id,
+                            rel_path,
+                            lang,
+                            job_id,
+                            output_path,
+                        )
 
                         initial_steps = [
                             {"id": "create_notebook", "label": "ノートブック作成", "status": "pending"},
@@ -366,6 +469,12 @@ async def sync_wiki_from_directory(
                         }
 
                         await db.store_create(job)
+                        logger.debug(
+                            "Wiki sync job stored sync_id=%s job_id=%s lang=%s",
+                            sync_id,
+                            job_id,
+                            lang,
+                        )
 
                         await db.create_video(
                             article_id=article["id"],
@@ -375,40 +484,77 @@ async def sync_wiki_from_directory(
                             style="whiteboard",
                             language=lang,
                         )
+                        logger.debug(
+                            "Wiki sync video row created sync_id=%s job_id=%s article_id=%s lang=%s",
+                            sync_id,
+                            job_id,
+                            article.get("id"),
+                            lang,
+                        )
 
-                        asyncio.create_task(run_job_fn(
-                            job_id=job_id,
-                            source_paths=[local_md_path],
-                            output_path=output_path,
-                            notebook_title=title,
-                            instructions=job["instructions"],
-                            style="whiteboard",
-                            video_format="explainer",
-                            language=lang,
-                            timeout=1800,
-                            store_update=store_update_fn,
-                            semaphore=semaphore,
-                        ))
+                        asyncio.create_task(
+                            run_job_fn(
+                                job_id=job_id,
+                                source_paths=[local_md_path],
+                                output_path=output_path,
+                                notebook_title=title,
+                                instructions=job["instructions"],
+                                style="whiteboard",
+                                video_format="explainer",
+                                language=lang,
+                                timeout=1800,
+                                store_update=store_update_fn,
+                                semaphore=semaphore,
+                            )
+                        )
                         jobs_created += 1
+                        logger.info(
+                            "Wiki sync job enqueued sync_id=%s job_id=%s lang=%s rel_path=%s",
+                            sync_id,
+                            job_id,
+                            lang,
+                            rel_path,
+                        )
+                else:
+                    logger.warning(
+                        "Wiki sync skipped enqueue sync_id=%s rel_path=%s reason=missing_job_dependencies",
+                        sync_id,
+                        rel_path,
+                    )
 
             except Exception as e:
-                logger.error("ファイル処理エラー %s: %s", rel_path, e)
+                logger.exception(
+                    "Wiki sync file processing error sync_id=%s rel_path=%s: %s",
+                    sync_id,
+                    rel_path,
+                    e,
+                )
 
         _sync_status["last_sync_at"] = _now()
         _sync_status["last_hash"] = new_hash
         _sync_status["total_articles"] = processed
         _sync_status["is_syncing"] = False
 
-        logger.info("ディレクトリ %s 同期完了: %d 記事処理, %d ジョブ投入", relative_dir or "ルート", processed, jobs_created)
+        logger.info(
+            "Wiki sync completed sync_id=%s mode=%s path=%s processed=%d jobs_created=%d hash=%s",
+            sync_id,
+            sync_mode,
+            normalized_path or "ルート",
+            processed,
+            jobs_created,
+            new_hash,
+        )
         return {
             "status": "success",
             "processed": processed,
             "jobs_created": jobs_created,
             "hash": new_hash,
+            "mode": sync_mode,
+            "path": normalized_path,
         }
 
     except Exception as exc:
-        logger.exception("Wiki ディレクトリ同期エラー: %s", exc)
+        logger.exception("Wiki sync fatal error sync_id=%s: %s", sync_id, exc)
         _sync_status["error"] = str(exc)
         _sync_status["is_syncing"] = False
         return {"status": "error", "message": str(exc)}
