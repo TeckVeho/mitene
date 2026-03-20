@@ -18,12 +18,15 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
 WIKI_GIT_REPO_URL: Optional[str] = os.environ.get("WIKI_GIT_REPO_URL")
 WIKI_GIT_LOCAL_PATH: str = os.environ.get("WIKI_GIT_LOCAL_PATH", "./wiki-repo")
 WIKI_GIT_BRANCH: str = os.environ.get("WIKI_GIT_BRANCH", "main")
+WIKI_GIT_TOKEN: Optional[str] = os.environ.get("WIKI_GIT_TOKEN")
+WIKI_GIT_HTTP_USERNAME: str = os.environ.get("WIKI_GIT_HTTP_USERNAME", "x-access-token")
 
 # カテゴリマッピング: ディレクトリ名 → カテゴリスラッグ・名前
 CATEGORY_MAP: dict[str, tuple[str, str]] = {
@@ -49,6 +52,51 @@ def _run_git(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:
     )
 
 
+def _redact_url_for_log(url: str) -> str:
+    """URL内の認証情報をマスクしてログ出力用に返す。"""
+    try:
+        parsed = urlsplit(url)
+        if parsed.username is None and parsed.password is None:
+            return url
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        redacted_netloc = f"***:***@{host}" if host else "***:***"
+        return urlunsplit((parsed.scheme, redacted_netloc, parsed.path, parsed.query, parsed.fragment))
+    except Exception:
+        return "***"
+
+
+def _auth_url_for_git_operations(repo_url: str) -> str:
+    """HTTPS URL にトークン認証情報を付与したURLを返す。"""
+    token = (WIKI_GIT_TOKEN or "").strip()
+    if not repo_url or not token:
+        return repo_url
+
+    try:
+        parsed = urlsplit(repo_url)
+    except Exception:
+        return repo_url
+
+    if parsed.scheme not in ("http", "https"):
+        return repo_url
+
+    # URL 既存認証情報がある場合は上書きしない
+    if parsed.username is not None:
+        return repo_url
+
+    host = parsed.hostname or ""
+    if not host:
+        return repo_url
+
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+
+    username = (WIKI_GIT_HTTP_USERNAME or "x-access-token").strip()
+    netloc = f"{username}:{token}@{host}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def _get_commit_hash(repo_path: str) -> Optional[str]:
     """現在の HEAD commit hash を返す"""
     try:
@@ -67,14 +115,20 @@ def _clone_or_pull(repo_url: str, local_path: str, branch: str) -> tuple[bool, O
     """
     path = Path(local_path)
 
+    auth_repo_url = _auth_url_for_git_operations(repo_url)
+
     if not path.exists():
         if not repo_url:
             logger.warning("WIKI_GIT_REPO_URL が設定されていないため、既存ディレクトリを使用します")
             return False, None
-        logger.info("Git リポジトリをクローン中: %s → %s", repo_url, local_path)
+        logger.info(
+            "Git リポジトリをクローン中: %s → %s",
+            _redact_url_for_log(auth_repo_url),
+            local_path,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["git", "clone", "--branch", branch, repo_url, str(path)],
+            ["git", "clone", "--branch", branch, auth_repo_url, str(path)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -82,12 +136,20 @@ def _clone_or_pull(repo_url: str, local_path: str, branch: str) -> tuple[bool, O
         if result.returncode != 0:
             logger.error("git clone 失敗: %s", result.stderr)
             return False, None
+        # clone 後は origin をクリーンURLに戻し、token を .git/config に残さない
+        if auth_repo_url != repo_url:
+            set_url_result = _run_git(["remote", "set-url", "origin", repo_url], str(path))
+            if set_url_result.returncode != 0:
+                logger.warning("git remote set-url 失敗: %s", set_url_result.stderr)
         return True, _get_commit_hash(str(path))
 
     # 既存リポジトリをpull
     old_hash = _get_commit_hash(str(path))
     logger.info("Git pull 実行中: %s (branch: %s)", local_path, branch)
-    result = _run_git(["pull", "origin", branch], str(path))
+    pull_target = auth_repo_url if auth_repo_url else "origin"
+    if pull_target != "origin":
+        logger.info("Git pull 実行先: %s", _redact_url_for_log(pull_target))
+    result = _run_git(["pull", pull_target, branch], str(path))
     if result.returncode != 0:
         logger.warning("git pull 失敗（オフラインまたは権限エラー）: %s", result.stderr)
         return True, old_hash  # エラーでも既存ファイルを処理
