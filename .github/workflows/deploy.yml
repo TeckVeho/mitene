@@ -39,6 +39,7 @@ jobs:
           rsync -rzu --delete \
             --exclude='.env' \
             --exclude='.venv' \
+            --exclude='wiki-repo' \
             --exclude='ecosystem.config.js' \
             ./ $USER@$HOST:$DEPLOY_PATH
           ssh $USER@$HOST "
