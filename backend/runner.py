@@ -88,6 +88,112 @@ async def _wait_for_source_ready(
     return False
 
 
+async def _wait_for_video_with_media_check(
+    client,
+    notebook_id: str,
+    task_id: str,
+    timeout: int,
+    media_ready_timeout: int = 120,
+    poll_interval: int = 10,
+):
+    """ライブラリのバグを回避し、正確に動画生成の完了を待機するラッパー。
+
+    notebooklm-py の `_is_media_ready()` には動画URLの判定バグがあり、URLが存在しても
+    Falseを返してしまう（結果として永続的に PROCESSING にダウングレードされてしまう）。
+    そのため、この関数の内部で直接APIの生データ (_list_raw) を参照し、
+    正しい構造で動画URLの有無を確認する。
+    """
+    from notebooklm.types import GenerationStatus
+    from notebooklm.rpc import artifact_status_to_str
+    
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    
+    # 完全にスタックした場合のエラー判定用
+    stuck_since: float | None = None
+    last_stuck_status: str | None = None
+
+    while True:
+        elapsed = loop.time() - start
+        if elapsed > timeout:
+            raise TimeoutError(f"Task {task_id} timed out after {timeout}s")
+
+        # 1. ライブラリ関数を使わず、直接アーティファクトのリストを取得
+        artifacts_data = await client.artifacts._list_raw(notebook_id)
+        
+        target_art = None
+        for art in artifacts_data:
+            if isinstance(art, list) and len(art) > 0 and art[0] == task_id:
+                target_art = art
+                break
+                
+        # 2. アーティファクトの状態判定
+        if not target_art:
+            current_status = "pending"
+            has_media = False
+        else:
+            status_code = target_art[4] if len(target_art) > 4 else 0
+            current_status = artifact_status_to_str(status_code)
+            
+            # download_video() と同じ確実なロジックでメディアURLの存在をチェック
+            has_media = False
+            if len(target_art) > 8 and isinstance(target_art[8], list):
+                for item in target_art[8]:
+                    if (
+                        isinstance(item, list)
+                        and len(item) > 0
+                        and isinstance(item[0], list)
+                        and len(item[0]) > 0
+                        and isinstance(item[0][0], str)
+                        and item[0][0].startswith("http")
+                    ):
+                        has_media = True
+                        break
+
+        logger.debug(
+            "poll_status bypass task_id=%s status=%s has_media=%s",
+            task_id, current_status, has_media
+        )
+
+        if current_status == "completed" and has_media:
+            return GenerationStatus(task_id=task_id, status="completed")
+            
+        if current_status in ("failed", "error"):
+            # 何らかの理由で生成自体が失敗
+            return GenerationStatus(task_id=task_id, status=current_status)
+
+        # 3. 停滞パターンの検知
+        # - "completed" だがURLがいつまでも取得できない
+        # （注意: "pending" は単に生成完了を待っている正常な状態なので、全体の timeout で管理する）
+        if current_status == "completed" and not has_media:
+            if stuck_since is None:
+                stuck_since = loop.time()
+                last_stuck_status = "completed_no_media"
+                logger.info(
+                    "Task %s: status=%s detected, starting stuck timer",
+                    task_id, last_stuck_status,
+                )
+            elif (loop.time() - stuck_since) > media_ready_timeout:
+                error_detail = (
+                    f"動画生成は完了しましたが、メディアURLが"
+                    f"{media_ready_timeout}秒経過しても取得できませんでした。"
+                    f"サーバー側で生成に失敗した可能性があります。再試行してください。"
+                )
+                logger.error(
+                    "Task %s: stuck in '%s' for %ds. %s",
+                    task_id, last_stuck_status, media_ready_timeout, error_detail,
+                )
+                raise TimeoutError(f"Task {task_id}: {error_detail}")
+        else:
+            # 正常に processing や pending の場合はタイマーをリセット
+            if stuck_since is not None:
+                logger.info("Task %s: status changed to '%s', resetting stuck timer", task_id, current_status)
+            stuck_since = None
+            last_stuck_status = None
+
+        await asyncio.sleep(poll_interval)
+
+
 async def run_job(
     *,
     job_id: str,
@@ -290,11 +396,11 @@ async def run_job(
                 store_update, job_id, steps, "wait_completion", "in_progress",
                 message=f"動画を生成中... (最大 {timeout // 60} 分)"
             )
-            final = await client.artifacts.wait_for_completion(
+            final = await _wait_for_video_with_media_check(
+                client,
                 nb.id,
                 gen_status.task_id,
                 timeout=timeout,
-                poll_interval=10,
             )
 
             if not final.is_complete:
