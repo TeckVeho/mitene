@@ -46,6 +46,7 @@
 
 - **Python 3.10 以上**
 - **Node.js 18 以上**（フロントエンド用）
+- **ffmpeg / ffprobe**（サムネイル生成用）
 - **Google アカウント**（NotebookLM 動画生成用）
 - **GitHub アカウント**（OAuth ログイン用）
 
@@ -61,6 +62,7 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
+brew install ffmpeg  # macOS（ffprobe も含まれる）
 
 # 環境変数（.env.example をコピーして編集）
 cp .env.example .env
@@ -127,6 +129,7 @@ notebooklm login
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth |
 | `NOTEVIDEO_API_KEYS` | 外部 API 用キー（カンマ区切り） |
 | `SLACK_WEBHOOK_URL` | ジョブ完了時の Slack 通知 |
+| `API_BASE_URL` | API ベース URL（`thumbnail_url` の絶対 URL 生成にも使用） |
 
 ### フロントエンド (`frontend/.env.local`)
 

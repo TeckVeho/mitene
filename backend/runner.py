@@ -12,9 +12,11 @@ S3_BUCKET_NAME 環境変数が設定されている場合、MP4 生成後に S3 
 
 import asyncio
 import logging
+import os
 import traceback
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
+from urllib.parse import urljoin
 
 import storage as storage_mod
 from webhook import send_webhook
@@ -275,6 +277,7 @@ async def run_job(
 
     job = await store_update(job_id, status="processing")
     steps: list[dict] = job["steps"]
+    thumbnail_generated = False
 
     try:
         async with await NotebookLMClient.from_storage() as client:
@@ -445,7 +448,44 @@ async def run_job(
                 output_path,
             )
 
+            thumbnail_path: Optional[Path] = None
+            try:
+                steps = await _set_step_status(
+                    store_update, job_id, steps, "download_ready", "in_progress",
+                    message="サムネイルを生成中..."
+                )
+                thumbnail_path = await asyncio.get_event_loop().run_in_executor(
+                    None, storage_mod.extract_thumbnail_locally, job_id, output_path
+                )
+                thumbnail_generated = True
+                logger.info("run_job thumbnail generated job_id=%s path=%s", job_id, thumbnail_path)
+            except Exception as thumb_exc:
+                logger.warning(
+                    "run_job thumbnail generation failed (continue): job_id=%s err=%s",
+                    job_id,
+                    thumb_exc,
+                )
+
             if storage_mod.is_s3_enabled():
+                if thumbnail_path is not None:
+                    try:
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, storage_mod.upload_thumbnail_to_s3, job_id, thumbnail_path
+                        )
+                        logger.info("run_job thumbnail upload success job_id=%s", job_id)
+                    except Exception as thumb_exc:
+                        logger.warning(
+                            "run_job thumbnail upload failed (continue): job_id=%s err=%s",
+                            job_id,
+                            thumb_exc,
+                        )
+                        if thumbnail_path.exists():
+                            logger.info(
+                                "run_job keep local thumbnail for debugging: job_id=%s path=%s",
+                                job_id,
+                                thumbnail_path,
+                            )
+
                 logger.info(
                     "run_job s3 upload start job_id=%s output_path=%s",
                     job_id,
@@ -479,7 +519,7 @@ async def run_job(
         logger.info("run_job completed job_id=%s completed_at=%s", job_id, completed_at)
 
         # ── Step 6: videos テーブルを更新 + Slack 通知 ────────────
-        await _on_job_completed(job_id, notebook_title)
+        await _on_job_completed(job_id, notebook_title, thumbnail_generated)
 
         if callback_url:
             await send_webhook(
@@ -531,7 +571,14 @@ async def run_job(
             semaphore.release()
 
 
-async def _on_job_completed(job_id: str, title: str) -> None:
+def _build_thumbnail_url(video_id: str) -> Optional[str]:
+    base_url = os.environ.get("API_BASE_URL")
+    if not base_url:
+        return None
+    return urljoin(base_url.rstrip("/") + "/", f"/api/videos/{video_id}/thumbnail")
+
+
+async def _on_job_completed(job_id: str, title: str, thumbnail_generated: bool = False) -> None:
     """ジョブ完了後の後処理: videos テーブル更新 + Slack 通知"""
     try:
         import database as db
@@ -542,10 +589,17 @@ async def _on_job_completed(job_id: str, title: str) -> None:
         if video:
             from datetime import datetime, timezone
             published_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            update_payload: dict = {
+                "status": "ready",
+                "published_at": published_at,
+            }
+            if thumbnail_generated:
+                thumbnail_url = _build_thumbnail_url(video["id"])
+                if thumbnail_url:
+                    update_payload["thumbnail_url"] = thumbnail_url
             await db.update_video(
                 video["id"],
-                status="ready",
-                published_at=published_at,
+                **update_payload,
             )
             updated_video = await db.get_video(video["id"])
             await notify_video_ready(

@@ -691,13 +691,40 @@ async function mockGetWikiSyncStatus(): Promise<WikiSyncStatus> {
 async function mockGetWikiDirectories(): Promise<WikiDirectory[]> {
   await mockDelay();
   return [
-    { path: "", label: "ルート", count: 2 },
-    { path: "security", label: "security", count: 3 },
-    { path: "development", label: "development", count: 4 },
+    {
+      path: "",
+      label: "ルート",
+      count: 2,
+      files: [
+        { fileName: "README.md", path: "README.md" },
+        { fileName: "CONTRIBUTING.md", path: "CONTRIBUTING.md" },
+      ],
+    },
+    {
+      path: "security",
+      label: "security",
+      count: 3,
+      files: [
+        { fileName: "github-security.md", path: "security/github-security.md" },
+        { fileName: "incident-response.md", path: "security/incident-response.md" },
+        { fileName: "zero-trust.md", path: "security/zero-trust.md" },
+      ],
+    },
+    {
+      path: "development",
+      label: "development",
+      count: 4,
+      files: [
+        { fileName: "code-review.md", path: "development/code-review.md" },
+        { fileName: "tdd.md", path: "development/tdd.md" },
+        { fileName: "branch-strategy.md", path: "development/branch-strategy.md" },
+        { fileName: "coding-standards.md", path: "development/coding-standards.md" },
+      ],
+    },
   ];
 }
 
-async function mockTriggerWikiSyncFromDirectory(_path: string): Promise<WikiSyncResult> {
+async function mockTriggerWikiSyncFromDirectory(_payload: { path?: string; paths?: string[] }): Promise<WikiSyncResult> {
   await mockDelay(1000);
   return { status: "success", processed: 2, jobs_created: 2, hash: "abc123def" };
 }
@@ -985,11 +1012,12 @@ async function realGetWikiDirectories(): Promise<WikiDirectory[]> {
   return res.json();
 }
 
-async function realTriggerWikiSyncFromDirectory(path: string): Promise<WikiSyncResult> {
-  const p = new URLSearchParams();
-  if (path) p.set("path", path);
-  const q = p.toString() ? `?${p}` : "";
-  const res = await fetch(`${BASE_URL}/wiki/sync-directory${q}`, { method: "POST" });
+async function realTriggerWikiSyncFromDirectory(payload: { path?: string; paths?: string[] }): Promise<WikiSyncResult> {
+  const res = await fetch(`${BASE_URL}/wiki/sync-directory`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   if (!res.ok) throw new Error("ディレクトリの動画作成の開始に失敗しました");
   return res.json();
 }

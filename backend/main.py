@@ -177,11 +177,17 @@ class ArticleResponse(BaseModel):
     updatedAt: str
 
 
+class WikiSyncDirectoryRequest(BaseModel):
+    path: Optional[str] = ""
+    paths: Optional[list[str]] = None
+
+
 # ---------------------------------------------------------------------------
 # Job semaphore（同時実行制限: 最大3件）
 # ---------------------------------------------------------------------------
 
-_job_semaphore = asyncio.Semaphore(3)
+MAX_CONCURRENT_JOBS = 1
+_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 def _now() -> str:
@@ -645,6 +651,31 @@ async def stream_video(video_id: str):
     return StreamingResponse(iter_file(), media_type="video/mp4")
 
 
+@app.get("/api/videos/{video_id}/thumbnail")
+async def stream_thumbnail(video_id: str):
+    """サムネイル画像を返す（S3時はリダイレクト、ローカル時はファイル返却）"""
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    if video.get("status") != "ready":
+        raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
+
+    job_id = video.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=404, detail="サムネイル情報が見つかりません")
+
+    if storage.is_s3_enabled():
+        url = storage.generate_thumbnail_streaming_url(job_id, expires_in=86400)
+        if not url:
+            raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
+        return RedirectResponse(url=url, status_code=302)
+
+    thumbnail_path = OUTPUTS_DIR / "thumbnails" / f"{job_id}.jpg"
+    if not thumbnail_path.exists():
+        raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
+    return FileResponse(path=str(thumbnail_path), media_type="image/jpeg")
+
+
 @app.post("/api/videos/{video_id}/watch")
 async def record_watch(
     video_id: str,
@@ -839,26 +870,40 @@ async def get_wiki_directories():
 
 
 @app.post("/api/wiki/sync-directory")
-async def trigger_wiki_sync_directory(background_tasks: BackgroundTasks, path: str = ""):
+async def trigger_wiki_sync_directory(
+    background_tasks: BackgroundTasks,
+    payload: Optional[WikiSyncDirectoryRequest] = None,
+    path: str = "",
+):
     """指定ディレクトリ配下の .md ファイルのみを同期し、動画生成を実行する"""
     from wiki_sync import sync_wiki_from_directory
 
+    requested_paths = payload.paths if payload and payload.paths else None
+    requested_path = (
+        payload.path
+        if payload and payload.path is not None
+        else path
+    )
+
     sync_id = f"sync_{uuid.uuid4().hex[:8]}"
     logger.info(
-        "Wiki sync request received sync_id=%s path=%s",
+        "Wiki sync request received sync_id=%s path=%s paths_count=%d",
         sync_id,
-        path or "(root)",
+        requested_path or "(root)",
+        len(requested_paths or []),
     )
 
     async def _do_sync():
         logger.info(
-            "Wiki sync background task started sync_id=%s path=%s",
+            "Wiki sync background task started sync_id=%s path=%s paths_count=%d",
             sync_id,
-            path or "(root)",
+            requested_path or "(root)",
+            len(requested_paths or []),
         )
         try:
             result = await sync_wiki_from_directory(
-                relative_dir=path,
+                relative_dir=requested_path or "",
+                target_paths=requested_paths,
                 store_update_fn=database.store_update,
                 run_job_fn=run_job,
                 semaphore=_job_semaphore,
@@ -878,14 +923,15 @@ async def trigger_wiki_sync_directory(background_tasks: BackgroundTasks, path: s
             logger.exception(
                 "Wiki sync background task crashed sync_id=%s path=%s",
                 sync_id,
-                path or "(root)",
+                requested_path or "(root)",
             )
             raise
 
     logger.info(
-        "Wiki sync background task scheduled sync_id=%s path=%s",
+        "Wiki sync background task scheduled sync_id=%s path=%s paths_count=%d",
         sync_id,
-        path or "(root)",
+        requested_path or "(root)",
+        len(requested_paths or []),
     )
     background_tasks.add_task(_do_sync)
     return {"message": "ディレクトリの動画作成を開始しました", "sync_id": sync_id}

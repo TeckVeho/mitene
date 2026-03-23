@@ -121,6 +121,9 @@ export interface Translations {
     syncStarted: string;
     createFromDirectory: string;
     selectDirectory: string;
+    selectParts: string;
+    allParts: string;
+    partHint: string;
     createVideos: string;
     noDirectories: string;
   };
