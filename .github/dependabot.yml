@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # =====================================
+  # Frontend (React / Vue - npm)
+  # =====================================
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      production-dependencies:
+        dependency-type: production
+      development-dependencies:
+        dependency-type: development
+    labels:
+      - "dependencies"
+      - "frontend"
+    ignore:
+      # メジャーアップデートを抑制したい場合（任意）
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+  # =====================================
+  # GitHub Actions
+  # =====================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Asia/Tokyo"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "ci"
