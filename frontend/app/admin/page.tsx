@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { AuthStatusValue } from "@/lib/types";
+import type { AuthStatusValue, WikiDirectory } from "@/lib/types";
 
 function getAuthConfig(t: ReturnType<typeof useLocale>["t"]): Record<AuthStatusValue, { label: string; icon: React.ElementType; className: string }> {
   return {
@@ -89,9 +89,32 @@ export default function AdminPage() {
   });
 
   const [selectedDir, setSelectedDir] = useState<string>("__none__");
+  const [selectedPartPaths, setSelectedPartPaths] = useState<string[]>([]);
+
+  const selectedDirectory = directories.find((d) => d.path === selectedDir);
+  const selectedDirectoryFiles = selectedDirectory?.files ?? [];
+  const hasPartSelector = selectedDir !== "__none__" && (selectedDirectory?.count ?? 0) >= 2 && selectedDirectoryFiles.length > 0;
+  const isAllPartsSelected = hasPartSelector && selectedPartPaths.length === selectedDirectoryFiles.length;
+
+  const toggleAllParts = () => {
+    if (!hasPartSelector) return;
+    if (isAllPartsSelected) {
+      setSelectedPartPaths([]);
+      return;
+    }
+    setSelectedPartPaths(selectedDirectoryFiles.map((f) => f.path));
+  };
+
+  const togglePart = (path: string) => {
+    setSelectedPartPaths((prev) => (
+      prev.includes(path)
+        ? prev.filter((p) => p !== path)
+        : [...prev, path]
+    ));
+  };
 
   const { mutate: triggerSyncFromDir, isPending: isSyncingFromDir } = useMutation({
-    mutationFn: (path: string) => api.triggerWikiSyncFromDirectory(path === "__none__" ? "" : path),
+    mutationFn: (payload: { path?: string; paths?: string[] }) => api.triggerWikiSyncFromDirectory(payload),
     onSuccess: (data) => {
       const msg = data.status === "success"
         ? (locale === "vi"
@@ -184,10 +207,24 @@ export default function AdminPage() {
             ) : directories.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t.admin.noDirectories}</p>
             ) : (
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="space-y-3">
                 <select
                   value={selectedDir}
-                  onChange={(e) => setSelectedDir(e.target.value)}
+                  onChange={(e) => {
+                    const nextDir = e.target.value;
+                    setSelectedDir(nextDir);
+                    if (nextDir === "__none__") {
+                      setSelectedPartPaths([]);
+                      return;
+                    }
+                    const nextDirectory = directories.find((d: WikiDirectory) => d.path === nextDir);
+                    const nextFiles = nextDirectory?.files ?? [];
+                    if ((nextDirectory?.count ?? 0) >= 2 && nextFiles.length > 0) {
+                      setSelectedPartPaths(nextFiles.map((f) => f.path));
+                    } else {
+                      setSelectedPartPaths([]);
+                    }
+                  }}
                   className="flex h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="__none__">{t.admin.selectDirectory}</option>
@@ -197,19 +234,75 @@ export default function AdminPage() {
                     </option>
                   ))}
                 </select>
-                <Button
-                  size="sm"
-                  onClick={() => triggerSyncFromDir(selectedDir)}
-                  disabled={isSyncingFromDir || syncStatus?.is_syncing || selectedDir === "__none__"}
-                  className="gap-1.5 shrink-0"
-                >
-                  {isSyncingFromDir || syncStatus?.is_syncing ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Play className="size-3.5" />
-                  )}
-                  {t.admin.createVideos}
-                </Button>
+                {hasPartSelector && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-foreground">{t.admin.selectParts}</p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isAllPartsSelected ? "secondary" : "outline"}
+                        className="h-7 px-2 text-xs"
+                        onClick={toggleAllParts}
+                      >
+                        {t.admin.allParts}
+                      </Button>
+                    </div>
+                    <div className="max-h-40 overflow-auto rounded-md border bg-background px-2 py-1.5 space-y-1">
+                      {selectedDirectoryFiles.map((f) => {
+                        const checked = selectedPartPaths.includes(f.path);
+                        return (
+                          <label
+                            key={f.path}
+                            className={cn(
+                              "flex items-center gap-2 rounded px-1.5 py-1 text-sm cursor-pointer hover:bg-muted/60",
+                              checked && "bg-muted"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePart(f.path)}
+                              className="size-4 accent-primary"
+                            />
+                            <span className="truncate">{f.fileName}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {locale === "vi"
+                        ? `Đã chọn ${selectedPartPaths.length}/${selectedDirectoryFiles.length} file`
+                        : `${selectedPartPaths.length}/${selectedDirectoryFiles.length} 件を選択中`}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{t.admin.partHint}</p>
+                  </div>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const payload = hasPartSelector
+                        ? { path: selectedDir, paths: selectedPartPaths }
+                        : { path: selectedDir === "__none__" ? "" : selectedDir };
+                      triggerSyncFromDir(payload);
+                    }}
+                    disabled={
+                      isSyncingFromDir
+                      || syncStatus?.is_syncing
+                      || selectedDir === "__none__"
+                      || (hasPartSelector && selectedPartPaths.length === 0)
+                    }
+                    className="gap-1.5"
+                  >
+                    {isSyncingFromDir || syncStatus?.is_syncing ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Play className="size-3.5" />
+                    )}
+                    {t.admin.createVideos}
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

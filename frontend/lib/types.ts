@@ -87,6 +87,10 @@ export interface WikiDirectory {
   path: string;
   label: string;
   count: number;
+  files?: Array<{
+    fileName: string;
+    path: string;
+  }>;
 }
 
 // ---------------------------------------------------------------------------

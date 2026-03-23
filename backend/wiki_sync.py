@@ -249,6 +249,7 @@ def get_wiki_directories() -> list[dict]:
         return []
 
     dir_counts: dict[str, int] = {}
+    dir_files: dict[str, list[dict[str, str]]] = {}
     for rel_path in md_files:
         parts = Path(rel_path).parts
         if len(parts) == 1:
@@ -256,18 +257,39 @@ def get_wiki_directories() -> list[dict]:
         else:
             dir_key = parts[0]
         dir_counts[dir_key] = dir_counts.get(dir_key, 0) + 1
+        dir_files.setdefault(dir_key, []).append(
+            {
+                "fileName": Path(rel_path).name,
+                "path": rel_path,
+            }
+        )
 
     result = []
     if "" in dir_counts:
-        result.append({"path": "", "label": "ルート", "count": dir_counts[""]})
+        result.append(
+            {
+                "path": "",
+                "label": "ルート",
+                "count": dir_counts[""],
+                "files": sorted(dir_files.get("", []), key=lambda f: f["path"]),
+            }
+        )
     for d in sorted(dir_counts.keys()):
         if d:
-            result.append({"path": d, "label": d, "count": dir_counts[d]})
+            result.append(
+                {
+                    "path": d,
+                    "label": d,
+                    "count": dir_counts[d],
+                    "files": sorted(dir_files.get(d, []), key=lambda f: f["path"]),
+                }
+            )
     return result
 
 
 async def sync_wiki_from_directory(
     relative_dir: str,
+    target_paths: Optional[list[str]] = None,
     store_update_fn=None,
     run_job_fn=None,
     semaphore=None,
@@ -275,7 +297,7 @@ async def sync_wiki_from_directory(
     sync_id: Optional[str] = None,
 ) -> dict:
     """
-    指定 path 配下の .md ファイルを同期し、動画生成ジョブを投入する。
+    指定 path 配下、または target_paths で指定した .md ファイルを同期し、動画生成ジョブを投入する。
     relative_dir はディレクトリまたは .md ファイルの相対 path を受け取る。
     """
     import database as db
@@ -294,10 +316,14 @@ async def sync_wiki_from_directory(
     try:
         local_path = os.path.abspath(WIKI_GIT_LOCAL_PATH)
         normalized_path = _normalize_sync_path(relative_dir)
+        normalized_target_paths = [
+            _normalize_sync_path(p) for p in (target_paths or []) if _normalize_sync_path(p).endswith(".md")
+        ]
         logger.info(
-            "Wiki sync started sync_id=%s relative_dir=%s local_path=%s branch=%s has_repo_url=%s",
+            "Wiki sync started sync_id=%s relative_dir=%s path_count=%d local_path=%s branch=%s has_repo_url=%s",
             sync_id,
             normalized_path or "(root)",
+            len(normalized_target_paths),
             local_path,
             WIKI_GIT_BRANCH,
             bool(WIKI_GIT_REPO_URL),
@@ -323,14 +349,20 @@ async def sync_wiki_from_directory(
             return {"status": "skipped", "message": "リポジトリが存在しません"}
 
         all_md = _get_all_md_files(local_path)
-        target_files, sync_mode = _resolve_target_md_files(all_md, normalized_path)
+        if normalized_target_paths:
+            all_md_set = set(all_md)
+            deduped_paths = list(dict.fromkeys(normalized_target_paths))
+            target_files = [p for p in deduped_paths if p in all_md_set]
+            sync_mode = "multi_file"
+        else:
+            target_files, sync_mode = _resolve_target_md_files(all_md, normalized_path)
         logger.info(
             "Wiki sync file discovery sync_id=%s mode=%s total_md=%d matched_md=%d path=%s",
             sync_id,
             sync_mode,
             len(all_md),
             len(target_files),
-            normalized_path or "(root)",
+            ",".join(target_files[:3]) if sync_mode == "multi_file" else (normalized_path or "(root)"),
         )
         if target_files:
             logger.debug(
@@ -341,7 +373,10 @@ async def sync_wiki_from_directory(
 
         if not target_files:
             _sync_status["is_syncing"] = False
-            dir_label = "ルート" if not normalized_path else normalized_path
+            if sync_mode == "multi_file":
+                dir_label = "選択ファイル"
+            else:
+                dir_label = "ルート" if not normalized_path else normalized_path
             logger.warning(
                 "Wiki sync no markdown files sync_id=%s mode=%s path=%s",
                 sync_id,
@@ -358,7 +393,7 @@ async def sync_wiki_from_directory(
             "Wiki sync processing started sync_id=%s mode=%s path=%s md_count=%d",
             sync_id,
             sync_mode,
-            normalized_path or "ルート",
+            "選択ファイル" if sync_mode == "multi_file" else (normalized_path or "ルート"),
             len(target_files),
         )
 
@@ -539,7 +574,7 @@ async def sync_wiki_from_directory(
             "Wiki sync completed sync_id=%s mode=%s path=%s processed=%d jobs_created=%d hash=%s",
             sync_id,
             sync_mode,
-            normalized_path or "ルート",
+            "選択ファイル" if sync_mode == "multi_file" else (normalized_path or "ルート"),
             processed,
             jobs_created,
             new_hash,
@@ -551,6 +586,7 @@ async def sync_wiki_from_directory(
             "hash": new_hash,
             "mode": sync_mode,
             "path": normalized_path,
+            "paths": target_files if sync_mode == "multi_file" else None,
         }
 
     except Exception as exc:
