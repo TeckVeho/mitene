@@ -11,6 +11,7 @@ S3 フォルダ構成:
 
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -112,6 +113,116 @@ def upload_mp4_to_s3(job_id: str, local_path: Path) -> Optional[str]:
         raise
 
 
+def _probe_video_duration_seconds(local_path: Path) -> Optional[float]:
+    """MP4 の秒数を ffprobe で取得する。"""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(local_path),
+    ]
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        duration_raw = result.stdout.strip()
+        if not duration_raw:
+            return None
+        duration = float(duration_raw)
+        if duration <= 0:
+            return None
+        return duration
+    except Exception as exc:
+        logger.warning("ffprobe で duration 取得失敗: %s", exc)
+        return None
+
+
+def _thumbnail_seek_seconds(duration_sec: Optional[float]) -> float:
+    """サムネイル抽出の seek 秒数を計算する。"""
+    if duration_sec is None:
+        return 5.0
+    if duration_sec <= 5:
+        return max(0.5, duration_sec / 2.0)
+    return min(max(duration_sec * 0.3, 3.0), duration_sec - 2.0)
+
+
+def extract_thumbnail_locally(job_id: str, mp4_path: Path) -> Path:
+    """
+    MP4 から JPEG サムネイルを抽出する。
+    成功時はローカル JPEG のパスを返す。
+    """
+    duration_sec = _probe_video_duration_seconds(mp4_path)
+    seek_sec = _thumbnail_seek_seconds(duration_sec)
+    thumbnails_dir = mp4_path.parent / "thumbnails"
+    thumbnails_dir.mkdir(parents=True, exist_ok=True)
+    thumbnail_path = thumbnails_dir / f"{job_id}.jpg"
+
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{seek_sec:.3f}",
+        "-i",
+        str(mp4_path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        str(thumbnail_path),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        logger.info(
+            "サムネイル抽出成功: job_id=%s seek=%.3fs path=%s",
+            job_id,
+            seek_sec,
+            thumbnail_path,
+        )
+        return thumbnail_path
+    except Exception as exc:
+        thumbnail_path.unlink(missing_ok=True)
+        logger.error("サムネイル抽出失敗: job_id=%s err=%s", job_id, exc)
+        raise
+
+
+def upload_thumbnail_to_s3(job_id: str, local_jpg: Path) -> Optional[str]:
+    """
+    サムネイル JPEG をローカルから S3 にアップロードする。
+    アップロード後、ローカルファイルは削除する。
+    S3 が無効な場合は None を返す。
+    """
+    if not is_s3_enabled():
+        return None
+
+    key = f"outputs/{job_id}.jpg"
+    try:
+        with open(local_jpg, "rb") as f:
+            _get_s3_client().upload_fileobj(
+                f,
+                S3_BUCKET,
+                key,
+                ExtraArgs={"ContentType": "image/jpeg"},
+            )
+        logger.info("サムネイルを S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
+
+        try:
+            local_jpg.unlink(missing_ok=True)
+            logger.debug("ローカルサムネイル一時ファイルを削除: %s", local_jpg)
+        except Exception as e:
+            logger.warning("ローカルサムネイル削除失敗（無視）: %s", e)
+
+        return key
+    except Exception as exc:
+        logger.error("サムネイル S3 アップロード失敗: %s", exc)
+        raise
+
+
 def generate_mp4_download_url(job_id: str, expires_in: int = 3600) -> Optional[str]:
     """
     MP4 の S3 署名付きダウンロード URL を生成する（有効期限: デフォルト1時間）。
@@ -152,6 +263,27 @@ def generate_mp4_streaming_url(job_id: str, expires_in: int = 86400) -> Optional
         return url
     except Exception as exc:
         logger.error("ストリーミング URL 生成失敗: %s", exc)
+        return None
+
+
+def generate_thumbnail_streaming_url(job_id: str, expires_in: int = 86400) -> Optional[str]:
+    """
+    サムネイル用 S3 署名付き URL を生成する（有効期限: デフォルト24時間）。
+    S3 が無効な場合は None を返す。
+    """
+    if not is_s3_enabled():
+        return None
+
+    key = f"outputs/{job_id}.jpg"
+    try:
+        url = _get_s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=expires_in,
+        )
+        return url
+    except Exception as exc:
+        logger.error("サムネイル URL 生成失敗: %s", exc)
         return None
 
 

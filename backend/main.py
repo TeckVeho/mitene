@@ -181,7 +181,8 @@ class ArticleResponse(BaseModel):
 # Job semaphore（同時実行制限: 最大3件）
 # ---------------------------------------------------------------------------
 
-_job_semaphore = asyncio.Semaphore(3)
+MAX_CONCURRENT_JOBS = 1
+_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
 def _now() -> str:
@@ -643,6 +644,31 @@ async def stream_video(video_id: str):
                 yield chunk
 
     return StreamingResponse(iter_file(), media_type="video/mp4")
+
+
+@app.get("/api/videos/{video_id}/thumbnail")
+async def stream_thumbnail(video_id: str):
+    """サムネイル画像を返す（S3時はリダイレクト、ローカル時はファイル返却）"""
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    if video.get("status") != "ready":
+        raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
+
+    job_id = video.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=404, detail="サムネイル情報が見つかりません")
+
+    if storage.is_s3_enabled():
+        url = storage.generate_thumbnail_streaming_url(job_id, expires_in=86400)
+        if not url:
+            raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
+        return RedirectResponse(url=url, status_code=302)
+
+    thumbnail_path = OUTPUTS_DIR / "thumbnails" / f"{job_id}.jpg"
+    if not thumbnail_path.exists():
+        raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
+    return FileResponse(path=str(thumbnail_path), media_type="image/jpeg")
 
 
 @app.post("/api/videos/{video_id}/watch")
