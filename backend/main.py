@@ -186,7 +186,7 @@ class WikiSyncDirectoryRequest(BaseModel):
 # Job semaphore（同時実行制限: 最大3件）
 # ---------------------------------------------------------------------------
 
-MAX_CONCURRENT_JOBS = 1
+MAX_CONCURRENT_JOBS = 3
 _job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
 
