@@ -60,7 +60,7 @@ class ExternalJobRequest(BaseModel):
     style: str = "whiteboard"
     format: str = "explainer"
     language: str = "ja"
-    timeout: int = 1800
+    timeout: int = 3600
     callback_url: Optional[str] = None
     source_files: list[MdFileInput]
 

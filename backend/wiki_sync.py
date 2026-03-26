@@ -425,7 +425,7 @@ async def sync_wiki_from_directory(
                             "style": "whiteboard",
                             "format": "explainer",
                             "language": lang,
-                            "timeout": 1800,
+                            "timeout": 3600,
                             "status": "pending",
                             "steps": initial_steps,
                             "currentStep": None,
@@ -457,7 +457,7 @@ async def sync_wiki_from_directory(
                                 style="whiteboard",
                                 video_format="explainer",
                                 language=lang,
-                                timeout=1800,
+                                timeout=3600,
                                 store_update=store_update_fn,
                                 semaphore=semaphore,
                             )
