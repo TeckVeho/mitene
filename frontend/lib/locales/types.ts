@@ -130,6 +130,20 @@ export interface Translations {
     partHint: string;
     createVideos: string;
     noDirectories: string;
+    videosList: string;
+    videosListHint: string;
+    searchVideosPlaceholder: string;
+    editVideo: string;
+    deleteVideo: string;
+    saveVideo: string;
+    cancelEdit: string;
+    confirmDeleteVideo: string;
+    videoTitleLabel: string;
+    videoDescriptionLabel: string;
+    videoStatusLabel: string;
+    noVideosInAdmin: string;
+    videoUpdated: string;
+    videoDeleted: string;
   };
 
   // Watch later
@@ -192,6 +206,7 @@ export interface Translations {
     sec: string;
     viewers: string;
     views: string;
+    adminMenuAria: string;
   };
 
   // Theme

@@ -295,3 +295,58 @@ def cleanup_local_csv(csv_paths: list[Path]) -> None:
             logger.debug("ローカル一時ファイルを削除: %s", path)
         except Exception as e:
             logger.warning("ローカルファイル削除失敗（無視）: %s", e)
+
+
+def delete_job_outputs(
+    job_id: str,
+    outputs_dir: Optional[Path] = None,
+    uploads_dir: Optional[Path] = None,
+) -> None:
+    """
+    動画レコード削除時に、S3 およびローカルのジョブ成果物をベストエフォートで削除する。
+    失敗しても例外は握りつぶす（DB は既に削除済みの想定）。
+    """
+    if is_s3_enabled():
+        keys = [f"outputs/{job_id}.mp4", f"outputs/{job_id}.jpg"]
+        prefix = f"uploads/{job_id}/"
+        try:
+            client = _get_s3_client()
+            for key in keys:
+                try:
+                    client.delete_object(Bucket=S3_BUCKET, Key=key)
+                    logger.debug("S3 削除: s3://%s/%s", S3_BUCKET, key)
+                except Exception as exc:
+                    logger.warning("S3 オブジェクト削除失敗（無視） key=%s: %s", key, exc)
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix):
+                objs = page.get("Contents") or []
+                if not objs:
+                    continue
+                client.delete_objects(
+                    Bucket=S3_BUCKET,
+                    Delete={"Objects": [{"Key": o["Key"]} for o in objs]},
+                )
+                logger.debug("S3 一括削除: %s 件 prefix=%s", len(objs), prefix)
+        except Exception as exc:
+            logger.warning("S3 ジョブ出力削除失敗（無視） job_id=%s: %s", job_id, exc)
+
+    if outputs_dir is not None:
+        mp4 = outputs_dir / f"{job_id}.mp4"
+        thumb = outputs_dir / "thumbnails" / f"{job_id}.jpg"
+        for path in (mp4, thumb):
+            try:
+                path.unlink(missing_ok=True)
+                logger.debug("ローカル出力削除: %s", path)
+            except Exception as exc:
+                logger.warning("ローカルファイル削除失敗（無視） %s: %s", path, exc)
+
+    if uploads_dir is not None:
+        try:
+            for path in uploads_dir.glob(f"{job_id}_*"):
+                try:
+                    path.unlink(missing_ok=True)
+                    logger.debug("ローカルアップロード削除: %s", path)
+                except Exception as exc:
+                    logger.warning("ローカルアップロード削除失敗（無視） %s: %s", path, exc)
+        except Exception as exc:
+            logger.warning("ローカルアップロード glob 失敗（無視） job_id=%s: %s", job_id, exc)

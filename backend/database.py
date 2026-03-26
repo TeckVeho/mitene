@@ -851,22 +851,36 @@ async def create_video(
             return dict(await cur.fetchone())
 
 
+_ALLOWED_VIDEO_UPDATE_FIELDS = frozenset(
+    {
+        "status",
+        "duration_sec",
+        "thumbnail_url",
+        "published_at",
+        "description",
+        "title",
+        "style",
+        "language",
+    }
+)
+
+
 async def update_video(video_id: str, **kwargs) -> Optional[dict]:
+    filtered = {k: v for k, v in kwargs.items() if k in _ALLOWED_VIDEO_UPDATE_FIELDS}
     if not _USE_MYSQL:
         async with _elearning_lock:
             if video_id not in _videos_store:
                 return None
-            _videos_store[video_id].update(kwargs)
-            _videos_store[video_id]["updated_at"] = _now()
+            if filtered:
+                _videos_store[video_id].update(filtered)
+                _videos_store[video_id]["updated_at"] = _now()
             return dict(_videos_store[video_id])
 
-    allowed_fields = {"status", "duration_sec", "thumbnail_url", "published_at", "description"}
     set_clauses = []
     params = []
-    for k, v in kwargs.items():
-        if k in allowed_fields:
-            set_clauses.append(f"`{k}` = %s")
-            params.append(v)
+    for k, v in filtered.items():
+        set_clauses.append(f"`{k}` = %s")
+        params.append(v)
     if not set_clauses:
         return await get_video(video_id)
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -877,6 +891,28 @@ async def update_video(video_id: str, **kwargs) -> Optional[dict]:
         async with conn.cursor() as cur:
             await cur.execute(f"UPDATE videos SET {', '.join(set_clauses)} WHERE id = %s", params)
     return await get_video(video_id)
+
+
+async def delete_video(video_id: str) -> bool:
+    if not _USE_MYSQL:
+        async with _elearning_lock:
+            if video_id not in _videos_store:
+                return False
+            del _videos_store[video_id]
+            _watch_history_store[:] = [h for h in _watch_history_store if h["video_id"] != video_id]
+            _watch_later_store[:] = [w for w in _watch_later_store if w["video_id"] != video_id]
+            _liked_videos_store[:] = [lv for lv in _liked_videos_store if lv["video_id"] != video_id]
+            comment_ids = [cid for cid, c in _comments_store.items() if c.get("video_id") == video_id]
+            for cid in comment_ids:
+                del _comments_store[cid]
+            dead = set(comment_ids)
+            _comment_likes_store[:] = [lk for lk in _comment_likes_store if lk["comment_id"] not in dead]
+            return True
+
+    async with _pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM videos WHERE id = %s", (video_id,))
+            return cur.rowcount > 0
 
 
 async def get_video(video_id: str) -> Optional[dict]:

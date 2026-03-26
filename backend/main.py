@@ -180,6 +180,17 @@ class ArticleResponse(BaseModel):
     updatedAt: str
 
 
+class AdminVideoPatchRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    thumbnailUrl: Optional[str] = None
+    durationSec: Optional[int] = None
+    publishedAt: Optional[str] = None
+    style: Optional[str] = None
+    language: Optional[str] = None
+
+
 class WikiSyncDirectoryRequest(BaseModel):
     path: Optional[str] = ""
     paths: Optional[list[str]] = None
@@ -671,6 +682,32 @@ def _build_wiki_url(git_path: Optional[str]) -> Optional[str]:
     return f"{base}/{git_path}" if base else None
 
 
+def _resolve_local_mp4_path(video_id: str, job_id: Optional[str]) -> Optional[Path]:
+    """
+    ローカル outputs: まず job_id.mp4（本番・S3 と同じキー規則）、無ければ video_id.mp4（手動配置や旧データ向け）。
+    """
+    if job_id:
+        p = OUTPUTS_DIR / f"{job_id}.mp4"
+        if p.is_file():
+            return p
+    p = OUTPUTS_DIR / f"{video_id}.mp4"
+    if p.is_file():
+        return p
+    return None
+
+
+def _resolve_local_thumbnail_path(video_id: str, job_id: Optional[str]) -> Optional[Path]:
+    thumbs = OUTPUTS_DIR / "thumbnails"
+    if job_id:
+        p = thumbs / f"{job_id}.jpg"
+        if p.is_file():
+            return p
+    p = thumbs / f"{video_id}.jpg"
+    if p.is_file():
+        return p
+    return None
+
+
 def _dict_to_comment(d: dict) -> CommentResponse:
     replies = [_dict_to_comment(r) for r in (d.get("replies") or [])]
     return CommentResponse(
@@ -773,16 +810,14 @@ async def stream_video(video_id: str):
         raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
 
     job_id = video.get("job_id")
-    if not job_id:
-        raise HTTPException(status_code=404, detail="動画ファイルの情報が見つかりません")
 
-    if storage.is_s3_enabled():
+    if storage.is_s3_enabled() and job_id:
         url = storage.generate_mp4_streaming_url(job_id, expires_in=86400)
         if url:
             return RedirectResponse(url=url, status_code=302)
 
-    output_path = OUTPUTS_DIR / f"{job_id}.mp4"
-    if not output_path.exists():
+    output_path = _resolve_local_mp4_path(video_id, job_id)
+    if not output_path:
         raise HTTPException(status_code=404, detail="動画ファイルが見つかりません")
 
     def iter_file():
@@ -803,17 +838,14 @@ async def stream_thumbnail(video_id: str):
         raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
 
     job_id = video.get("job_id")
-    if not job_id:
-        raise HTTPException(status_code=404, detail="サムネイル情報が見つかりません")
 
-    if storage.is_s3_enabled():
+    if storage.is_s3_enabled() and job_id:
         url = storage.generate_thumbnail_streaming_url(job_id, expires_in=86400)
-        if not url:
-            raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
-        return RedirectResponse(url=url, status_code=302)
+        if url:
+            return RedirectResponse(url=url, status_code=302)
 
-    thumbnail_path = OUTPUTS_DIR / "thumbnails" / f"{job_id}.jpg"
-    if not thumbnail_path.exists():
+    thumbnail_path = _resolve_local_thumbnail_path(video_id, job_id)
+    if not thumbnail_path:
         raise HTTPException(status_code=404, detail="サムネイルが見つかりません")
     return FileResponse(path=str(thumbnail_path), media_type="image/jpeg")
 
@@ -1108,6 +1140,75 @@ async def get_wiki_sync_status(_admin: Annotated[dict, Depends(require_admin_use
 # ---------------------------------------------------------------------------
 # Admin routes
 # ---------------------------------------------------------------------------
+
+
+def _admin_video_patch_to_db(body: AdminVideoPatchRequest) -> dict:
+    raw = body.model_dump(exclude_unset=True)
+    key_map = {
+        "thumbnailUrl": "thumbnail_url",
+        "durationSec": "duration_sec",
+        "publishedAt": "published_at",
+    }
+    return {key_map.get(k, k): v for k, v in raw.items()}
+
+
+@app.get("/api/admin/videos", response_model=list[VideoResponse])
+async def get_admin_videos(
+    _admin: Annotated[dict, Depends(require_admin_user)],
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """全ステータス・全言語の動画一覧（管理用）"""
+    videos = await database.list_videos(
+        category_slug=None,
+        search=search,
+        status=None,
+        limit=limit,
+        offset=offset,
+        user_id=None,
+        language=None,
+        published_after=None,
+    )
+    out: list[VideoResponse] = []
+    for v in videos:
+        vc, vv = await database.get_video_watch_counts(v["id"])
+        out.append(_video_dict_to_response(v, vc, vv))
+    return out
+
+
+@app.patch("/api/admin/videos/{video_id}", response_model=VideoResponse)
+async def patch_admin_video(
+    video_id: str,
+    body: AdminVideoPatchRequest,
+    _admin: Annotated[dict, Depends(require_admin_user)],
+):
+    existing = await database.get_video(video_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    patch = _admin_video_patch_to_db(body)
+    updated = await database.update_video(video_id, **patch)
+    if not updated:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    vc, vv = await database.get_video_watch_counts(video_id)
+    return _video_dict_to_response(updated, vc, vv)
+
+
+@app.delete("/api/admin/videos/{video_id}", status_code=204)
+async def delete_admin_video(
+    video_id: str,
+    _admin: Annotated[dict, Depends(require_admin_user)],
+):
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    job_id = video.get("job_id")
+    deleted = await database.delete_video(video_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    if job_id:
+        storage.delete_job_outputs(job_id, outputs_dir=OUTPUTS_DIR, uploads_dir=UPLOADS_DIR)
+    return Response(status_code=204)
 
 
 @app.get("/api/admin/articles", response_model=list[ArticleResponse])

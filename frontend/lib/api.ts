@@ -13,6 +13,7 @@ import type {
   WikiSyncStatus,
   WikiDirectory,
   ArticleRecord,
+  AdminVideoPatch,
 } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
@@ -238,6 +239,37 @@ async function realGetAdminArticles(): Promise<ArticleRecord[]> {
   return res.json();
 }
 
+async function realGetAdminVideos(params?: {
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<Video[]> {
+  const p = new URLSearchParams();
+  if (params?.search) p.set("search", params.search);
+  if (params?.limit != null) p.set("limit", String(params.limit));
+  if (params?.offset != null) p.set("offset", String(params.offset));
+  const query = p.toString();
+  const url = query ? `${BASE_URL}/admin/videos?${query}` : `${BASE_URL}/admin/videos`;
+  const res = await fetch(url, withUserAuth());
+  if (!res.ok) throw new Error("管理用動画一覧の取得に失敗しました");
+  return res.json();
+}
+
+async function realPatchAdminVideo(id: string, body: AdminVideoPatch): Promise<Video> {
+  const res = await fetch(`${BASE_URL}/admin/videos/${id}`, withUserAuth({
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+  if (!res.ok) throw new Error("動画の更新に失敗しました");
+  return res.json();
+}
+
+async function realDeleteAdminVideo(id: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/admin/videos/${id}`, withUserAuth({ method: "DELETE" }));
+  if (!res.ok) throw new Error("動画の削除に失敗しました");
+}
+
 async function realGetWikiDirectories(): Promise<WikiDirectory[]> {
   const res = await fetch(`${BASE_URL}/wiki/directories`, withUserAuth());
   if (!res.ok) throw new Error("ディレクトリ一覧の取得に失敗しました");
@@ -307,6 +339,9 @@ export const api = {
   getWikiDirectories: realGetWikiDirectories,
   triggerWikiSyncFromDirectory: realTriggerWikiSyncFromDirectory,
   getAdminArticles: realGetAdminArticles,
+  getAdminVideos: realGetAdminVideos,
+  patchAdminVideo: realPatchAdminVideo,
+  deleteAdminVideo: realDeleteAdminVideo,
 
   getStats: realGetStats,
   getJobs: realGetJobs,

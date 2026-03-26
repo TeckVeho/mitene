@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { VideoCard } from "@/components/videos/video-card";
 import { CommentSection } from "@/components/videos/comment-section";
+import { VideoAdminMenu } from "@/components/videos/video-admin-menu";
 import { LoginRequiredDialog } from "@/components/auth/login-required-dialog";
 import { api } from "@/lib/api";
 import { playRandomCelebration } from "@/lib/celebration-animations";
@@ -70,6 +71,7 @@ export default function VideoPlayerPage({ params }: Props) {
     queryFn: () => api.getCurrentUser(),
   });
   const isLoggedIn = !!currentUser;
+  const isAdmin = currentUser?.isAdmin === true;
 
   const { data: relatedVideos = [] } = useQuery({
     queryKey: ["videos", "related", video?.categorySlug, locale],
@@ -203,8 +205,9 @@ export default function VideoPlayerPage({ params }: Props) {
           {/* Title & Meta */}
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
-              <h1 className="text-xl font-bold text-foreground leading-snug">{video.title}</h1>
+              <h1 className="text-xl font-bold text-foreground leading-snug min-w-0 flex-1">{video.title}</h1>
               <div className="flex items-center gap-3 shrink-0">
+                {isAdmin && <VideoAdminMenu video={video} />}
                 {!isAlreadyWatched && (
                   <Button
                     size="sm"
