@@ -181,6 +181,8 @@ class RemoteBrowserSession:
             except Exception as e:
                 logger.warning("Error stopping Xvfb: %s", e)
             self._xvfb_proc = None
+            # Reset DISPLAY so next session re-creates Xvfb
+            os.environ.pop("DISPLAY", None)
         self._context = None
         self._page = None
         self._playwright = None
