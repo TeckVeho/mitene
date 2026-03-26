@@ -59,43 +59,28 @@ def _build_google_cookie_jar(cookies: list[dict]) -> dict[str, str]:
 
 
 async def validate_auth_live(timeout_sec: float = 8.0) -> bool:
-    """Validate that saved Google session can still access NotebookLM."""
+    """Validate that saved Google session is usable by notebooklm-py."""
     if not STORAGE_STATE.exists():
         return False
 
     try:
-        cookies = _load_storage_cookies()
-        cookie_jar = _build_google_cookie_jar(cookies)
-        if not cookie_jar:
-            return False
+        from notebooklm.auth import AuthTokens
 
-        async with httpx.AsyncClient(
-            timeout=timeout_sec,
-            follow_redirects=False,
-            headers={"User-Agent": "mitene-auth-check/1.0"},
-        ) as client:
-            res = await client.get("https://notebooklm.google.com/", cookies=cookie_jar)
-            location = (res.headers.get("location") or "").lower()
-            if res.status_code in {301, 302, 303, 307, 308} and "accounts.google.com" in location:
-                return False
-            if res.status_code != 200:
-                return False
-
-            body = res.text.lower()
-            if "servicelogin" in body and "accounts.google.com" in body:
-                return False
-            return True
+        tokens = AuthTokens.from_storage(str(STORAGE_STATE))
+        # If from_storage succeeds and returns tokens, the auth is valid
+        return tokens is not None
     except Exception:
         return False
 
 
 async def check_auth_status_strict() -> str:
-    """Return auth status using storage pre-check + live session validation."""
+    """Return auth status using storage pre-check + library validation."""
     precheck = check_auth_from_storage()
-    if precheck != "authenticated":
+    if precheck == "not_logged_in":
         return precheck
-    is_live_valid = await validate_auth_live()
-    return "authenticated" if is_live_valid else "session_expired"
+    # Use notebooklm-py's own validation instead of httpx
+    is_valid = await validate_auth_live()
+    return "authenticated" if is_valid else "session_expired"
 
 
 def find_notebooklm() -> str:
