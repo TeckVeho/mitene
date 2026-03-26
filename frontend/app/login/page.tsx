@@ -8,8 +8,6 @@ import { useLocale } from "@/lib/locale-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 const GITHUB_LOGIN_URL = `${API_BASE.replace(/\/api\/?$/, "")}/api/auth/github`;
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
-const MOCK_LOGIN_URL = "/login/callback?user_id=user_demo&email=demo@example.com&display_name=デモユーザー";
 
 function LoginContent() {
   const router = useRouter();
@@ -18,7 +16,10 @@ function LoginContent() {
   const error = searchParams.get("error");
 
   function handleGitHubLogin() {
-    window.open(GITHUB_LOGIN_URL, "_blank", "noopener,noreferrer");
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const sep = GITHUB_LOGIN_URL.includes("?") ? "&" : "?";
+    const url = `${GITHUB_LOGIN_URL}${sep}frontend_base=${encodeURIComponent(origin)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   // 別タブでログイン完了した場合、opener からポーリングで検知する
@@ -72,15 +73,6 @@ function LoginContent() {
             <Github className="size-5" />
             {t.login.loginWithGitHub}
           </button>
-
-          {USE_MOCK && (
-            <Link
-              href={MOCK_LOGIN_URL}
-              className="block w-full flex items-center justify-center gap-3 h-12 px-4 rounded-xl border border-[#e5e5e5] dark:border-[#3f3f3f] text-[#606060] dark:text-[#909090] font-medium hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
-            >
-              {t.login.mockLogin}
-            </Link>
-          )}
 
           <p className="text-xs text-[#606060] dark:text-[#909090] text-center">
             {t.login.authOpensInNewTab}

@@ -7,7 +7,6 @@ import {
   Home,
   History,
   Settings,
-  GraduationCap,
   Shield,
   Code2,
   Server,
@@ -162,7 +161,13 @@ export function Sidebar() {
     staleTime: 60000,
   });
 
+  const { data: currentUser } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => api.getCurrentUser(),
+  });
+
   const visibleCategories = categories.filter((c) => c.videoCount > 0);
+  const showAdminNav = currentUser?.isAdmin === true;
 
   return (
     <aside
@@ -207,13 +212,15 @@ export function Sidebar() {
         ))}
       </div>
 
-      <SectionDivider mini={mini} />
-
-      {/* Bottom */}
-      <div className={cn("px-2 py-2 space-y-0.5", mini && "px-1")}>
-        <NavItem href="/admin" icon={Settings} label={t.sidebar.admin} mini={mini} />
-        <NavItem href="/admin" icon={GraduationCap} label={t.sidebar.administrator} mini={mini} />
-      </div>
+      {/* Bottom — admin only (ADMIN_EMAILS on backend) */}
+      {showAdminNav && (
+        <>
+          <SectionDivider mini={mini} />
+          <div className={cn("px-2 py-2 space-y-0.5", mini && "px-1")}>
+            <NavItem href="/admin" icon={Settings} label={t.sidebar.admin} mini={mini} />
+          </div>
+        </>
+      )}
 
       {!mini && (
         <div className="px-4 py-4 text-[11px] text-[#606060] dark:text-[#909090] leading-relaxed">

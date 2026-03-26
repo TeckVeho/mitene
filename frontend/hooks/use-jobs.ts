@@ -3,23 +3,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-export function useJobStats() {
+export function useJobStats(enabled = true) {
   return useQuery({
     queryKey: ["jobs", "stats"],
     queryFn: () => api.getStats(),
     refetchInterval: 10000,
+    enabled,
   });
 }
 
-export function useJobs(status?: string) {
+export function useJobs(status?: string, enabled = true) {
   return useQuery({
     queryKey: ["jobs", status ?? "all"],
     queryFn: () => api.getJobs(status),
     refetchInterval: 10000,
+    enabled,
   });
 }
 
-export function useJob(id: string) {
+export function useJob(id: string, enabled = true) {
   return useQuery({
     queryKey: ["jobs", id],
     queryFn: () => api.getJob(id),
@@ -28,6 +30,6 @@ export function useJob(id: string) {
       if (job?.status === "processing" || job?.status === "pending") return 5000;
       return false;
     },
-    enabled: !!id,
+    enabled: !!id && enabled,
   });
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "@/lib/locale-context";
 import {
@@ -57,15 +58,33 @@ function VideoStatusBadge({ status, t }: { status?: string | null; t: ReturnType
 }
 
 export default function AdminPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { t, locale } = useLocale();
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const AUTH_CONFIG = getAuthConfig(t);
 
+  const { data: gateUser, isLoading: gateAuthLoading } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => api.getCurrentUser(),
+  });
+
+  useEffect(() => {
+    if (gateAuthLoading) return;
+    if (!gateUser) {
+      router.replace("/login");
+      return;
+    }
+    if (!gateUser.isAdmin) {
+      router.replace("/");
+    }
+  }, [gateAuthLoading, gateUser, router]);
+
   const { data: authStatus } = useQuery({
     queryKey: ["auth-status"],
     queryFn: () => api.getAuthStatus(),
     refetchInterval: 30000,
+    enabled: gateUser?.isAdmin === true,
   });
 
   const { mutate: triggerLogin, isPending: isLoggingIn } = useMutation({
@@ -80,12 +99,14 @@ export default function AdminPage() {
     queryKey: ["wiki-sync-status"],
     queryFn: () => api.getWikiSyncStatus(),
     refetchInterval: 10000,
+    enabled: gateUser?.isAdmin === true,
   });
 
   const { data: directories = [], isLoading: directoriesLoading } = useQuery({
     queryKey: ["wiki-directories"],
     queryFn: () => api.getWikiDirectories(),
     staleTime: 60000,
+    enabled: gateUser?.isAdmin === true,
   });
 
   const [selectedDir, setSelectedDir] = useState<string>("__none__");
@@ -133,13 +154,23 @@ export default function AdminPage() {
     queryKey: ["admin-articles"],
     queryFn: () => api.getAdminArticles(),
     staleTime: 30000,
+    enabled: gateUser?.isAdmin === true,
   });
 
   const { data: jobStats } = useQuery({
     queryKey: ["jobs-stats"],
     queryFn: () => api.getStats(),
     refetchInterval: 15000,
+    enabled: gateUser?.isAdmin === true,
   });
+
+  if (gateAuthLoading || !gateUser || !gateUser.isAdmin) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   const authState = authStatus?.status ?? "not_logged_in";
   const authCfg = AUTH_CONFIG[authState];

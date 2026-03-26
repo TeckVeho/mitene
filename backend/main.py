@@ -10,6 +10,8 @@ E-learning バックエンド API
 """
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import shutil
@@ -22,12 +24,12 @@ from dotenv import load_dotenv
 load_dotenv(_Path(__file__).parent / ".env")
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Cookie, Header
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile, Cookie, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import database
 import storage
@@ -140,6 +142,7 @@ class UserResponse(BaseModel):
     email: str
     displayName: str
     createdAt: str
+    isAdmin: bool = False
 
 
 class WatchRequest(BaseModel):
@@ -180,6 +183,24 @@ class ArticleResponse(BaseModel):
 class WikiSyncDirectoryRequest(BaseModel):
     path: Optional[str] = ""
     paths: Optional[list[str]] = None
+
+
+class CommentResponse(BaseModel):
+    id: str
+    videoId: str
+    userId: str
+    displayName: str
+    text: str
+    likeCount: int
+    likedByMe: bool
+    createdAt: str
+    parentId: Optional[str] = None
+    replies: List["CommentResponse"] = Field(default_factory=list)
+
+
+class CreateCommentBody(BaseModel):
+    text: str
+    parentId: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +263,79 @@ app.add_middleware(
 app.include_router(v1_router)
 
 
+def _allowed_oauth_frontends() -> set[str]:
+    """Browser origins allowed as GitHub OAuth return target (localStorage is per-origin)."""
+    bases: set[str] = set()
+    fu = (os.environ.get("FRONTEND_URL") or "http://localhost:3000").strip().rstrip("/")
+    if fu:
+        bases.add(fu)
+    for o in _CORS_ORIGINS:
+        o = o.strip().rstrip("/")
+        if o:
+            bases.add(o)
+    return bases
+
+
+def _resolve_oauth_frontend(requested: Optional[str]) -> str:
+    req = (requested or "").strip().rstrip("/")
+    allowed = _allowed_oauth_frontends()
+    if req in allowed:
+        return req
+    return (os.environ.get("FRONTEND_URL") or "http://localhost:3000").strip().rstrip("/")
+
+
+def _oauth_state_encode(frontend_base: str) -> str:
+    raw = json.dumps({"fb": frontend_base}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _oauth_state_decode(state: Optional[str]) -> Optional[str]:
+    if not state:
+        return None
+    try:
+        pad = "=" * (-len(state) % 4)
+        data = json.loads(base64.urlsafe_b64decode(state + pad))
+        fb = data.get("fb")
+        if isinstance(fb, str):
+            return fb.strip().rstrip("/")
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Admin allowlist (ADMIN_EMAILS=comma-separated, case-insensitive; empty = no admins)
+# ---------------------------------------------------------------------------
+
+_ADMIN_EMAILS_LOWER: frozenset[str] = frozenset(
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+)
+
+
+def _is_admin_email(email: Optional[str]) -> bool:
+    if not email or not _ADMIN_EMAILS_LOWER:
+        return False
+    return email.strip().lower() in _ADMIN_EMAILS_LOWER
+
+
+async def require_admin_user(
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+) -> dict:
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    user = await database.get_user(uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="ユーザーが見つかりません")
+    em = user.get("email") or ""
+    if not _is_admin_email(em):
+        raise HTTPException(status_code=403, detail="管理権限がありません")
+    return user
+
+
 @app.on_event("startup")
 async def _on_startup() -> None:
     await database.init_db()
@@ -293,7 +387,7 @@ def _check_auth_from_storage() -> str:
 
 
 @app.get("/api/auth/status", response_model=AuthStatus)
-async def get_auth_status():
+async def get_auth_status(_admin: Annotated[dict, Depends(require_admin_user)]):
     return AuthStatus(status=_check_auth_from_storage())
 
 
@@ -323,7 +417,7 @@ def _find_notebooklm() -> str:
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
-async def trigger_login():
+async def trigger_login(_admin: Annotated[dict, Depends(require_admin_user)]):
     try:
         notebooklm_cmd = _find_notebooklm()
         env = os.environ.copy()
@@ -349,8 +443,12 @@ _FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 
 @app.get("/api/auth/github")
-async def github_oauth_start():
-    """GitHub OAuth を開始。別タブで開く想定。"""
+async def github_oauth_start(frontend_base: Optional[str] = None):
+    """GitHub OAuth を開始。別タブで開く想定。
+
+    `frontend_base` にブラウザの origin（例: http://127.0.0.1:3000）を渡すと、
+    コールバック後その URL に戻す（localhost と 127.0.0.1 で localStorage が分かれないようにする）。
+    """
     if not _GITHUB_CLIENT_ID:
         raise HTTPException(
             status_code=500,
@@ -360,10 +458,13 @@ async def github_oauth_start():
 
     base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
     redirect_uri = f"{base_url}/api/auth/github/callback"
+    fb = _resolve_oauth_frontend(frontend_base)
+    oauth_state = _oauth_state_encode(fb)
     params = {
         "client_id": _GITHUB_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "scope": "user:email read:user",
+        "state": oauth_state,
     }
     return RedirectResponse(
         url=f"https://github.com/login/oauth/authorize?{urlencode(params)}",
@@ -372,11 +473,22 @@ async def github_oauth_start():
 
 
 @app.get("/api/auth/github/callback")
-async def github_oauth_callback(code: Optional[str] = None, error: Optional[str] = None):
+async def github_oauth_callback(
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = None,
+):
     """GitHub OAuth コールバック。トークン交換後、フロントエンドにリダイレクト。"""
+    def _redirect_front() -> str:
+        fb = _oauth_state_decode(state)
+        if fb and fb in _allowed_oauth_frontends():
+            return fb
+        return _FRONTEND_URL.rstrip("/")
+
     if error:
+        front = _redirect_front()
         return RedirectResponse(
-            url=f"{_FRONTEND_URL}/login?error={error}",
+            url=f"{front}/login?error={error}",
             status_code=302,
         )
     if not code:
@@ -405,8 +517,9 @@ async def github_oauth_callback(code: Optional[str] = None, error: Optional[str]
         token_data = token_res.json()
         access_token = token_data.get("access_token")
         if not access_token:
+            front = _redirect_front()
             return RedirectResponse(
-                url=f"{_FRONTEND_URL}/login?error=access_denied",
+                url=f"{front}/login?error=access_denied",
                 status_code=302,
             )
 
@@ -437,17 +550,26 @@ async def github_oauth_callback(code: Optional[str] = None, error: Optional[str]
 
     user = await database.get_or_create_user(email, display_name)
 
-    # フロントエンドにリダイレクト（user_id をクエリで渡す）
+    # フロントエンドにリダイレクト（クエリで localStorage 用 + API 用 HttpOnly cookie）
     from urllib.parse import urlencode
+
+    front = _redirect_front()
     q = urlencode({
         "user_id": user["id"],
         "email": user["email"],
         "display_name": user.get("display_name", user.get("displayName", display_name)),
     })
-    return RedirectResponse(
-        url=f"{_FRONTEND_URL}/login/callback?{q}",
-        status_code=302,
+    target = f"{front}/login/callback?{q}"
+    response = RedirectResponse(url=target, status_code=302)
+    response.set_cookie(
+        key="user_id",
+        value=user["id"],
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
     )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +584,7 @@ def _mask_key(key: str) -> str:
 
 
 @app.get("/api/settings/api-info", response_model=ApiInfoResponse)
-async def get_api_info():
+async def get_api_info(_admin: Annotated[dict, Depends(require_admin_user)]):
     raw = os.environ.get("NOTEVIDEO_API_KEYS", "")
     keys = [k.strip() for k in raw.split(",") if k.strip()]
     masked = [_mask_key(k) for k in keys]
@@ -480,7 +602,7 @@ async def get_api_info():
 
 
 @app.get("/api/jobs/stats", response_model=JobStats)
-async def get_stats():
+async def get_stats(_admin: Annotated[dict, Depends(require_admin_user)]):
     jobs = await database.store_list()
     return JobStats(
         total=len(jobs),
@@ -491,17 +613,21 @@ async def get_stats():
 
 
 @app.get("/api/jobs", response_model=list[Job])
-async def get_jobs(status: Optional[str] = None, type: Optional[str] = None):
+async def get_jobs(
+    _admin: Annotated[dict, Depends(require_admin_user)],
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+):
     return await database.store_list(status, job_type=type)
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
-async def get_job(job_id: str):
+async def get_job(job_id: str, _admin: Annotated[dict, Depends(require_admin_user)]):
     return await database.store_get(job_id)
 
 
 @app.get("/api/jobs/{job_id}/download")
-async def download_job(job_id: str):
+async def download_job(job_id: str, _admin: Annotated[dict, Depends(require_admin_user)]):
     job = await database.store_get(job_id)
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="ファイルはまだ準備ができていません")
@@ -543,6 +669,22 @@ def _build_wiki_url(git_path: Optional[str]) -> Optional[str]:
         else:
             return None
     return f"{base}/{git_path}" if base else None
+
+
+def _dict_to_comment(d: dict) -> CommentResponse:
+    replies = [_dict_to_comment(r) for r in (d.get("replies") or [])]
+    return CommentResponse(
+        id=d["id"],
+        videoId=d["videoId"],
+        userId=d["userId"],
+        displayName=d["displayName"],
+        text=d["text"],
+        likeCount=int(d.get("likeCount", 0)),
+        likedByMe=bool(d.get("likedByMe")),
+        createdAt=str(d.get("createdAt", "")),
+        parentId=d.get("parentId"),
+        replies=replies,
+    )
 
 
 def _video_dict_to_response(v: dict, viewer_count: int = 0, view_count: int = 0) -> VideoResponse:
@@ -730,30 +872,35 @@ async def user_login(req: UserLoginRequest, response: Response):
         samesite="lax",
         max_age=60 * 60 * 24 * 30,
     )
+    em = user.get("email") or ""
     return UserResponse(
         id=user["id"],
-        email=user["email"],
+        email=em,
         displayName=user.get("display_name", user.get("displayName", "")),
         createdAt=str(user.get("created_at", "")),
+        isAdmin=_is_admin_email(em),
     )
 
 
-@app.get("/api/users/me", response_model=UserResponse)
+@app.get("/api/users/me", response_model=Optional[UserResponse])
 async def get_current_user(
     x_user_id: Optional[str] = Header(default=None),
     user_id: Optional[str] = Cookie(default=None),
 ):
+    """未ログイン時は 401 ではなく null（200）を返す。呼び出し側は認証なしで利用可能。"""
     uid = x_user_id or user_id
     if not uid:
-        raise HTTPException(status_code=401, detail="ログインが必要です")
+        return None
     user = await database.get_user(uid)
     if not user:
         raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+    em = user.get("email") or ""
     return UserResponse(
         id=user["id"],
-        email=user["email"],
+        email=em,
         displayName=user.get("display_name", user.get("displayName", "")),
         createdAt=str(user.get("created_at", "")),
+        isAdmin=_is_admin_email(em),
     )
 
 
@@ -857,13 +1004,61 @@ async def get_liked_videos(
     return [_video_dict_to_response(v) for v in videos]
 
 
+@app.get("/api/videos/{video_id}/comments", response_model=list[CommentResponse])
+async def list_video_comments(
+    video_id: str,
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    viewer = x_user_id or user_id
+    raw = await database.list_comments_for_video(video_id, viewer)
+    return [_dict_to_comment(c) for c in raw]
+
+
+@app.post("/api/videos/{video_id}/comments", response_model=CommentResponse)
+async def create_video_comment(
+    video_id: str,
+    body: CreateCommentBody,
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    video = await database.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    created = await database.create_comment(video_id, uid, body.text, body.parentId)
+    if not created:
+        raise HTTPException(status_code=400, detail="コメントを投稿できません")
+    return _dict_to_comment(created)
+
+
+@app.post("/api/comments/{comment_id}/like", response_model=CommentResponse)
+async def toggle_comment_like_route(
+    comment_id: str,
+    x_user_id: Optional[str] = Header(default=None),
+    user_id: Optional[str] = Cookie(default=None),
+):
+    uid = x_user_id or user_id
+    if not uid:
+        raise HTTPException(status_code=401, detail="ログインが必要です")
+    out = await database.toggle_comment_like(comment_id, uid)
+    if not out:
+        raise HTTPException(status_code=404, detail="コメントが見つかりません")
+    return _dict_to_comment(out)
+
+
 # ---------------------------------------------------------------------------
 # Wiki sync routes
 # ---------------------------------------------------------------------------
 
 
 @app.get("/api/wiki/directories")
-async def get_wiki_directories():
+async def get_wiki_directories(_admin: Annotated[dict, Depends(require_admin_user)]):
     """リポジトリ内の .md を含むディレクトリ一覧を返す"""
     from wiki_sync import get_wiki_directories as _get_dirs
     return _get_dirs()
@@ -872,6 +1067,7 @@ async def get_wiki_directories():
 @app.post("/api/wiki/sync-directory")
 async def trigger_wiki_sync_directory(
     background_tasks: BackgroundTasks,
+    _admin: Annotated[dict, Depends(require_admin_user)],
     payload: Optional[WikiSyncDirectoryRequest] = None,
     path: str = "",
 ):
@@ -938,7 +1134,7 @@ async def trigger_wiki_sync_directory(
 
 
 @app.get("/api/wiki/sync-status")
-async def get_wiki_sync_status():
+async def get_wiki_sync_status(_admin: Annotated[dict, Depends(require_admin_user)]):
     """Wiki同期の現在の状態を返す"""
     from wiki_sync import get_sync_status
     return get_sync_status()
@@ -950,7 +1146,7 @@ async def get_wiki_sync_status():
 
 
 @app.get("/api/admin/articles", response_model=list[ArticleResponse])
-async def get_admin_articles():
+async def get_admin_articles(_admin: Annotated[dict, Depends(require_admin_user)]):
     """記事一覧と動画生成状況を返す（管理用）"""
     articles = await database.list_articles()
     return [

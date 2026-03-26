@@ -29,7 +29,6 @@ export const vi: Translations = {
     likedVideos: "Video đã thích",
     categories: "Danh mục",
     admin: "Quản trị",
-    administrator: "Quản trị viên",
     copyright: "© 2024 MITENE",
   },
   userMenu: {
@@ -67,11 +66,14 @@ export const vi: Translations = {
     subtitle: "Đăng nhập bằng tài khoản GitHub",
     description: "E-learning dành cho kỹ sư nội bộ",
     loginWithGitHub: "Đăng nhập bằng GitHub",
-    mockLogin: "Đăng nhập mock (xem demo)",
     authOpensInNewTab: "Xác thực GitHub sẽ mở trong tab mới. Sau khi hoàn tất, trang này sẽ tự động cập nhật.",
     authErrorCancelled: "Xác thực đã bị hủy",
     authError: "Lỗi",
     forEngineers: "E-learning dành cho kỹ sư nội bộ",
+  },
+  loginRequiredModal: {
+    title: "Vui lòng đăng nhập",
+    description: "Bạn cần đăng nhập để thực hiện thao tác này.",
   },
   admin: {
     title: "Quản trị",

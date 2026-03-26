@@ -18,6 +18,7 @@ function CallbackContent() {
         localStorage.setItem("user_id", userId);
         localStorage.setItem("user_email", email);
         localStorage.setItem("user_display_name", displayName);
+        window.dispatchEvent(new Event("mitene-auth-changed"));
       }
       router.replace("/");
     } else {

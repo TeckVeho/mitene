@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -31,8 +32,29 @@ function UserMenu() {
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  useEffect(() => {
+  function refreshUser() {
     api.getCurrentUser().then((u) => setUser(u));
+  }
+
+  useEffect(() => {
+    refreshUser();
+    function onStorage(e: StorageEvent) {
+      if (e.key === "user_id" || e.key === null) refreshUser();
+    }
+    function onFocus() {
+      refreshUser();
+    }
+    function onAuthChanged() {
+      refreshUser();
+    }
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("mitene-auth-changed", onAuthChanged);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("mitene-auth-changed", onAuthChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -104,14 +126,16 @@ function UserMenu() {
             <History className="size-4 text-[#606060] dark:text-[#909090]" />
             {t.userMenu.watchHistory}
           </Link>
-          <Link
-            href="/admin"
-            className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
-            onClick={() => setOpen(false)}
-          >
-            <Settings className="size-4 text-[#606060] dark:text-[#909090]" />
-            {t.userMenu.admin}
-          </Link>
+          {user.isAdmin && (
+            <Link
+              href="/admin"
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
+              onClick={() => setOpen(false)}
+            >
+              <Settings className="size-4 text-[#606060] dark:text-[#909090]" />
+              {t.userMenu.admin}
+            </Link>
+          )}
           <div className="border-t border-[#e5e5e5] dark:border-[#3f3f3f] mt-1 pt-1">
             <button
               onClick={handleLogout}
@@ -188,6 +212,11 @@ function SearchBar() {
 export function Header() {
   const { toggle } = useSidebar();
   const { t } = useLocale();
+  const { data: currentUser } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => api.getCurrentUser(),
+  });
+  const showAdminChrome = currentUser?.isAdmin === true;
 
   return (
     <header className="flex items-center gap-2 h-14 px-4 bg-white dark:bg-[#0f0f0f] sticky top-0 z-50 shrink-0">
@@ -227,13 +256,15 @@ export function Header() {
 
       {/* Right: actions + user */}
       <div className="flex items-center gap-1 shrink-0">
-        <Link
-          href="/admin"
-          className="hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-full border border-[#ccc] dark:border-[#3f3f3f] text-sm font-medium text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
-        >
-          <RefreshCw className="size-4" />
-          <span>{t.common.sync}</span>
-        </Link>
+        {showAdminChrome && (
+          <Link
+            href="/admin"
+            className="hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-full border border-[#ccc] dark:border-[#3f3f3f] text-sm font-medium text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
+          >
+            <RefreshCw className="size-4" />
+            <span>{t.common.sync}</span>
+          </Link>
+        )}
         <button
           className="flex items-center justify-center size-10 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
           aria-label={t.header.notifications}

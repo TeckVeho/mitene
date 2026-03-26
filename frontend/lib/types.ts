@@ -40,6 +40,7 @@ export interface User {
   email: string;
   displayName: string;
   createdAt: string;
+  isAdmin?: boolean;
 }
 
 export interface WatchRecord {

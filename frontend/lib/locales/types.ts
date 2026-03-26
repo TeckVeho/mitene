@@ -34,7 +34,6 @@ export interface Translations {
     likedVideos: string;
     categories: string;
     admin: string;
-    administrator: string;
     copyright: string;
   };
 
@@ -82,11 +81,16 @@ export interface Translations {
     subtitle: string;
     description: string;
     loginWithGitHub: string;
-    mockLogin: string;
     authOpensInNewTab: string;
     authErrorCancelled: string;
     authError: string;
     forEngineers: string;
+  };
+
+  // Login required (modal)
+  loginRequiredModal: {
+    title: string;
+    description: string;
   };
 
   // Admin

@@ -29,7 +29,6 @@ export const ja: Translations = {
     likedVideos: "高く評価した動画",
     categories: "カテゴリ",
     admin: "管理画面",
-    administrator: "管理者",
     copyright: "© 2024 MITENE",
   },
   userMenu: {
@@ -67,11 +66,14 @@ export const ja: Translations = {
     subtitle: "GitHubアカウントでログインしてください",
     description: "社内エンジニア向けE-learning",
     loginWithGitHub: "GitHubでログイン",
-    mockLogin: "モックでログイン（デモ閲覧）",
     authOpensInNewTab: "別タブでGitHub認証が開きます。認証完了後、このページが自動で更新されます。",
     authErrorCancelled: "認証がキャンセルされました",
     authError: "エラー",
     forEngineers: "社内エンジニア向けE-learning",
+  },
+  loginRequiredModal: {
+    title: "ログインしてください",
+    description: "この操作を行うにはログインが必要です。",
   },
   admin: {
     title: "管理画面",
