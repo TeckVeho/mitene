@@ -26,6 +26,18 @@ export interface Video {
   wikiUrl?: string;
 }
 
+/** Request body for PATCH /api/admin/videos/{id} */
+export type AdminVideoPatch = {
+  title?: string;
+  description?: string;
+  status?: string;
+  thumbnailUrl?: string;
+  durationSec?: number;
+  publishedAt?: string | null;
+  style?: string;
+  language?: string;
+};
+
 export interface Category {
   id: string;
   name: string;
@@ -40,6 +52,7 @@ export interface User {
   email: string;
   displayName: string;
   createdAt: string;
+  isAdmin?: boolean;
 }
 
 export interface WatchRecord {

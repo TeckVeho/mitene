@@ -34,7 +34,6 @@ export interface Translations {
     likedVideos: string;
     categories: string;
     admin: string;
-    administrator: string;
     copyright: string;
   };
 
@@ -82,11 +81,16 @@ export interface Translations {
     subtitle: string;
     description: string;
     loginWithGitHub: string;
-    mockLogin: string;
     authOpensInNewTab: string;
     authErrorCancelled: string;
     authError: string;
     forEngineers: string;
+  };
+
+  // Login required (modal)
+  loginRequiredModal: {
+    title: string;
+    description: string;
   };
 
   // Admin
@@ -126,6 +130,20 @@ export interface Translations {
     partHint: string;
     createVideos: string;
     noDirectories: string;
+    videosList: string;
+    videosListHint: string;
+    searchVideosPlaceholder: string;
+    editVideo: string;
+    deleteVideo: string;
+    saveVideo: string;
+    cancelEdit: string;
+    confirmDeleteVideo: string;
+    videoTitleLabel: string;
+    videoDescriptionLabel: string;
+    videoStatusLabel: string;
+    noVideosInAdmin: string;
+    videoUpdated: string;
+    videoDeleted: string;
   };
 
   // Watch later
@@ -188,6 +206,7 @@ export interface Translations {
     sec: string;
     viewers: string;
     views: string;
+    adminMenuAria: string;
   };
 
   // Theme

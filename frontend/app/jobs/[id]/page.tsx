@@ -1,7 +1,9 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Download, RefreshCw, ArrowLeft, FileSpreadsheet, Loader2, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,7 +30,34 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 export default function JobDetailPage({ params }: JobDetailPageProps) {
   const { id } = use(params);
-  const { data: job, isLoading, error } = useJob(id);
+  const router = useRouter();
+
+  const { data: gateUser, isLoading: gateLoading } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => api.getCurrentUser(),
+  });
+
+  useEffect(() => {
+    if (gateLoading) return;
+    if (!gateUser) {
+      router.replace("/login");
+      return;
+    }
+    if (!gateUser.isAdmin) {
+      router.replace("/");
+    }
+  }, [gateLoading, gateUser, router]);
+
+  const canFetch = gateUser?.isAdmin === true;
+  const { data: job, isLoading, error } = useJob(id, canFetch);
+
+  if (gateLoading || !gateUser || !gateUser.isAdmin) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

@@ -63,7 +63,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
 brew install ffmpeg  # macOS（ffprobe も含まれる）
-
+sudo apt install -y xvfb # virtual display
 # 環境変数（.env.example をコピーして編集）
 cp .env.example .env
 ```
@@ -99,7 +99,8 @@ cd frontend && npm run dev
 
 1. [GitHub Developer Settings](https://github.com/settings/developers) で OAuth App を作成
 2. `backend/.env` に `GITHUB_CLIENT_ID` と `GITHUB_CLIENT_SECRET` を設定
-3. `FRONTEND_URL` と `API_BASE_URL` を適切に設定
+3. `FRONTEND_URL` と `API_BASE_URL` を適切に設定（ブラウザで開く URL と一致させる。`localhost` と `127.0.0.1` は別オリジン扱いのため、GitHub ログイン後のリダイレクトは `frontend_base` クエリで自動調整されます）
+4. `ADMIN_EMAILS` に管理用メールアドレスをカンマ区切りで設定する。リストに含まれる GitHub アカウントのメールのみ、管理メニュー・ジョブ・Wiki 同期・NotebookLM 連携 API などにアクセスできる。未設定または空の場合は誰も管理者になれない。
 
 ### NotebookLM 認証（動画生成時）
 
@@ -127,6 +128,7 @@ notebooklm login
 | `WIKI_GIT_LOCAL_PATH` | Wiki クローン先パス |
 | `WIKI_BASE_URL` | Wiki サイト URL（動画詳細の元記事リンク用） |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth |
+| `ADMIN_EMAILS` | 管理者メール（カンマ区切り）。未設定または空なら管理者なし |
 | `NOTEVIDEO_API_KEYS` | 外部 API 用キー（カンマ区切り） |
 | `SLACK_WEBHOOK_URL` | ジョブ完了時の Slack 通知 |
 | `API_BASE_URL` | API ベース URL（`thumbnail_url` の絶対 URL 生成にも使用） |
@@ -164,11 +166,12 @@ notebooklm login
 ```
 mitene/
 ├── backend/           # FastAPI バックエンド
-│   ├── main.py        # メインアプリ・ルート定義
-│   ├── api_v1.py      # 外部 API v1
-│   ├── database.py    # DB 抽象化
-│   ├── runner.py      # 動画生成ジョブランナー
-│   ├── wiki_sync.py   # Wiki Git 同期
+│   ├── main.py        # uvicorn エントリ (`app` を re-export)
+│   ├── app/           # アプリ本体（routers / schemas / services / db）
+│   ├── database.py    # DB 公開 API（app.db への互換シム）
+│   ├── api_v1.py      # 外部 API v1（app.routers.v1 へのシム）
+│   ├── runner.py      # ジョブランナー（app.services.runner へのシム）
+│   ├── wiki_sync.py   # Wiki 同期（app.services.wiki_sync へのシム）
 │   └── storage.py     # S3 / ローカルストレージ
 ├── frontend/          # Next.js フロントエンド
 │   ├── app/           # App Router ページ

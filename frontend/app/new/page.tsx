@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { VideoCard } from "@/components/videos/video-card";
@@ -9,7 +9,9 @@ import { useLocale } from "@/lib/locale-context";
 
 function NewContent() {
   const { t, locale } = useLocale();
-  const publishedAfter = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const [publishedAfter] = useState(
+    () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  );
 
   const { data: videos = [], isLoading } = useQuery({
     queryKey: ["videos", "new", publishedAfter, locale],

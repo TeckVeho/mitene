@@ -68,9 +68,20 @@ interface CommentInputProps {
   onSuccess?: () => void;
   autoFocus?: boolean;
   compact?: boolean;
+  isLoggedIn: boolean;
+  onRequireLogin: () => void;
 }
 
-function CommentInput({ videoId, parentId, placeholder, onSuccess, autoFocus, compact }: CommentInputProps) {
+function CommentInput({
+  videoId,
+  parentId,
+  placeholder,
+  onSuccess,
+  autoFocus,
+  compact,
+  isLoggedIn,
+  onRequireLogin,
+}: CommentInputProps) {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(autoFocus ?? false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -92,9 +103,18 @@ function CommentInput({ videoId, parentId, placeholder, onSuccess, autoFocus, co
     }
   }, [autoFocus]);
 
+  function trySubmit() {
+    if (!isLoggedIn) {
+      onRequireLogin();
+      return;
+    }
+    if (!text.trim()) return;
+    mutation.mutate();
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && text.trim()) {
-      mutation.mutate();
+      trySubmit();
     }
   }
 
@@ -139,7 +159,7 @@ function CommentInput({ videoId, parentId, placeholder, onSuccess, autoFocus, co
             </button>
             <button
               type="button"
-              onClick={() => mutation.mutate()}
+              onClick={() => trySubmit()}
               disabled={!text.trim() || mutation.isPending}
               className={cn(
                 "flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
@@ -166,7 +186,17 @@ function CommentInput({ videoId, parentId, placeholder, onSuccess, autoFocus, co
 // CommentReplyItem
 // ---------------------------------------------------------------------------
 
-function CommentReplyItem({ comment, videoId }: { comment: Comment; videoId: string }) {
+function CommentReplyItem({
+  comment,
+  videoId,
+  isLoggedIn,
+  onRequireLogin,
+}: {
+  comment: Comment;
+  videoId: string;
+  isLoggedIn: boolean;
+  onRequireLogin: () => void;
+}) {
   const queryClient = useQueryClient();
 
   const likeMutation = useMutation({
@@ -175,6 +205,14 @@ function CommentReplyItem({ comment, videoId }: { comment: Comment; videoId: str
       queryClient.invalidateQueries({ queryKey: ["comments", videoId] });
     },
   });
+
+  function tryLike() {
+    if (!isLoggedIn) {
+      onRequireLogin();
+      return;
+    }
+    likeMutation.mutate();
+  }
 
   return (
     <div className="flex gap-3">
@@ -198,7 +236,8 @@ function CommentReplyItem({ comment, videoId }: { comment: Comment; videoId: str
         </p>
         <div className="flex items-center gap-1 mt-2">
           <button
-            onClick={() => likeMutation.mutate()}
+            type="button"
+            onClick={() => tryLike()}
             className="flex items-center gap-1 px-2 py-1 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
           >
             <ThumbsUp className={cn(
@@ -209,7 +248,7 @@ function CommentReplyItem({ comment, videoId }: { comment: Comment; videoId: str
               <span className="text-xs text-[#606060] dark:text-[#909090]">{comment.likeCount}</span>
             )}
           </button>
-          <button className="p-1 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors">
+          <button type="button" className="p-1 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors">
             <ThumbsDown className="size-3.5 text-[#606060] dark:text-[#909090]" />
           </button>
         </div>
@@ -222,7 +261,17 @@ function CommentReplyItem({ comment, videoId }: { comment: Comment; videoId: str
 // CommentItem
 // ---------------------------------------------------------------------------
 
-function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }) {
+function CommentItem({
+  comment,
+  videoId,
+  isLoggedIn,
+  onRequireLogin,
+}: {
+  comment: Comment;
+  videoId: string;
+  isLoggedIn: boolean;
+  onRequireLogin: () => void;
+}) {
   const [showReplies, setShowReplies] = useState(false);
   const [showReplyInput, setShowReplyInput] = useState(false);
   const queryClient = useQueryClient();
@@ -234,6 +283,14 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
       queryClient.invalidateQueries({ queryKey: ["comments", videoId] });
     },
   });
+
+  function tryLike() {
+    if (!isLoggedIn) {
+      onRequireLogin();
+      return;
+    }
+    likeMutation.mutate();
+  }
 
   return (
     <div className="flex gap-3">
@@ -262,7 +319,8 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
         {/* Actions */}
         <div className="flex items-center gap-1 mt-2">
           <button
-            onClick={() => likeMutation.mutate()}
+            type="button"
+            onClick={() => tryLike()}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
           >
             <ThumbsUp className={cn(
@@ -273,10 +331,11 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
               <span className="text-xs text-[#606060] dark:text-[#909090]">{comment.likeCount}</span>
             )}
           </button>
-          <button className="p-1.5 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors">
+          <button type="button" className="p-1.5 rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors">
             <ThumbsDown className="size-4 text-[#606060] dark:text-[#909090]" />
           </button>
           <button
+            type="button"
             onClick={() => setShowReplyInput((v) => !v)}
             className="px-3 py-1.5 text-xs font-semibold text-[#0f0f0f] dark:text-[#f1f1f1] rounded-full hover:bg-[#f2f2f2] dark:hover:bg-[#272727] transition-colors"
           >
@@ -293,6 +352,8 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
               placeholder="返信を追加..."
               compact
               autoFocus
+              isLoggedIn={isLoggedIn}
+              onRequireLogin={onRequireLogin}
               onSuccess={() => {
                 setShowReplyInput(false);
                 setShowReplies(true);
@@ -320,7 +381,13 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
         {showReplies && comment.replies && (
           <div className="mt-3 space-y-4 pl-0">
             {comment.replies.map((reply) => (
-              <CommentReplyItem key={reply.id} comment={reply} videoId={videoId} />
+              <CommentReplyItem
+                key={reply.id}
+                comment={reply}
+                videoId={videoId}
+                isLoggedIn={isLoggedIn}
+                onRequireLogin={onRequireLogin}
+              />
             ))}
           </div>
         )}
@@ -335,7 +402,15 @@ function CommentItem({ comment, videoId }: { comment: Comment; videoId: string }
 
 type SortKey = "top" | "new";
 
-export function CommentSection({ videoId }: { videoId: string }) {
+export function CommentSection({
+  videoId,
+  isLoggedIn,
+  onRequireLogin,
+}: {
+  videoId: string;
+  isLoggedIn: boolean;
+  onRequireLogin: () => void;
+}) {
   const [sort, setSort] = useState<SortKey>("top");
   const [showSortMenu, setShowSortMenu] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
@@ -403,7 +478,11 @@ export function CommentSection({ videoId }: { videoId: string }) {
       </div>
 
       {/* Input */}
-      <CommentInput videoId={videoId} />
+      <CommentInput
+        videoId={videoId}
+        isLoggedIn={isLoggedIn}
+        onRequireLogin={onRequireLogin}
+      />
 
       {/* List */}
       {isLoading ? (
@@ -417,7 +496,13 @@ export function CommentSection({ videoId }: { videoId: string }) {
       ) : (
         <div className="space-y-6">
           {sortedComments.map((comment) => (
-            <CommentItem key={comment.id} comment={comment} videoId={videoId} />
+            <CommentItem
+              key={comment.id}
+              comment={comment}
+              videoId={videoId}
+              isLoggedIn={isLoggedIn}
+              onRequireLogin={onRequireLogin}
+            />
           ))}
         </div>
       )}

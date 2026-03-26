@@ -22,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { VideoCard } from "@/components/videos/video-card";
 import { CommentSection } from "@/components/videos/comment-section";
+import { VideoAdminMenu } from "@/components/videos/video-admin-menu";
+import { LoginRequiredDialog } from "@/components/auth/login-required-dialog";
 import { api } from "@/lib/api";
 import { playRandomCelebration } from "@/lib/celebration-animations";
 import { cn } from "@/lib/utils";
@@ -56,6 +58,7 @@ export default function VideoPlayerPage({ params }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [markAsWatchedDone, setMarkAsWatchedDone] = useState(false);
   const [showMarkdown, setShowMarkdown] = useState(false);
+  const [loginPromptOpen, setLoginPromptOpen] = useState(false);
 
   const { data: video, isLoading, error } = useQuery({
     queryKey: ["videos", id],
@@ -68,6 +71,7 @@ export default function VideoPlayerPage({ params }: Props) {
     queryFn: () => api.getCurrentUser(),
   });
   const isLoggedIn = !!currentUser;
+  const isAdmin = currentUser?.isAdmin === true;
 
   const { data: relatedVideos = [] } = useQuery({
     queryKey: ["videos", "related", video?.categorySlug, locale],
@@ -114,9 +118,13 @@ export default function VideoPlayerPage({ params }: Props) {
     },
   });
 
-  const handleMarkWatched = useCallback(() => {
+  const requestMarkWatched = useCallback(() => {
+    if (!isLoggedIn) {
+      setLoginPromptOpen(true);
+      return;
+    }
     watchMutation.mutate();
-  }, [watchMutation]);
+  }, [isLoggedIn, watchMutation]);
 
   if (isLoading) {
     return (
@@ -170,7 +178,7 @@ export default function VideoPlayerPage({ params }: Props) {
                 src={streamUrl}
                 controls
                 className="w-full h-full"
-                onEnded={handleMarkWatched}
+                onEnded={requestMarkWatched}
                 poster={video.thumbnailUrl ?? undefined}
               />
             ) : (
@@ -197,14 +205,15 @@ export default function VideoPlayerPage({ params }: Props) {
           {/* Title & Meta */}
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
-              <h1 className="text-xl font-bold text-foreground leading-snug">{video.title}</h1>
+              <h1 className="text-xl font-bold text-foreground leading-snug min-w-0 flex-1">{video.title}</h1>
               <div className="flex items-center gap-3 shrink-0">
+                {isAdmin && <VideoAdminMenu video={video} />}
                 {!isAlreadyWatched && (
                   <Button
                     size="sm"
                     variant="outline"
                     className="gap-1.5"
-                    onClick={handleMarkWatched}
+                    onClick={requestMarkWatched}
                     disabled={watchMutation.isPending}
                   >
                     {watchMutation.isPending ? (
@@ -336,7 +345,11 @@ export default function VideoPlayerPage({ params }: Props) {
 
           {/* Comments */}
           <div className="border-t border-[#e5e5e5] dark:border-[#3f3f3f] pt-6">
-            <CommentSection videoId={id} />
+            <CommentSection
+              videoId={id}
+              isLoggedIn={isLoggedIn}
+              onRequireLogin={() => setLoginPromptOpen(true)}
+            />
           </div>
         </div>
 
@@ -354,6 +367,8 @@ export default function VideoPlayerPage({ params }: Props) {
           </div>
         )}
       </div>
+
+      <LoginRequiredDialog open={loginPromptOpen} onOpenChange={setLoginPromptOpen} />
     </div>
   );
 }

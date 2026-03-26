@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { JobTable } from "@/components/jobs/job-table";
 import { useJobs } from "@/hooks/use-jobs";
-import { Video } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import type { JobStatus } from "@/lib/types";
 
 type StatusFilter = "all" | JobStatus;
@@ -18,10 +20,38 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 ];
 
 export default function JobsPage() {
+  const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const { data: gateUser, isLoading: gateLoading } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => api.getCurrentUser(),
+  });
+
+  useEffect(() => {
+    if (gateLoading) return;
+    if (!gateUser) {
+      router.replace("/login");
+      return;
+    }
+    if (!gateUser.isAdmin) {
+      router.replace("/");
+    }
+  }, [gateLoading, gateUser, router]);
+
+  const canFetch = gateUser?.isAdmin === true;
   const { data: jobs, isLoading } = useJobs(
     statusFilter === "all" ? undefined : statusFilter,
+    canFetch,
   );
+
+  if (gateLoading || !gateUser || !gateUser.isAdmin) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">

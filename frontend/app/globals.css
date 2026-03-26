@@ -108,3 +108,35 @@ body {
 video::-webkit-media-controls-panel {
   background-color: rgba(0, 0, 0, 0.7);
 }
+
+/* Admin ⋮ dropdown — mở/đóng kiểu menu trong video player (scale + fade từ góc) */
+@keyframes dropdown-player-open {
+  0% {
+    opacity: 0;
+    transform: scale3d(0.88, 0.88, 1) translate3d(0, -6px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale3d(1, 1, 1) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes dropdown-player-close {
+  0% {
+    opacity: 1;
+    transform: scale3d(1, 1, 1) translate3d(0, 0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale3d(0.94, 0.94, 1) translate3d(0, -4px, 0);
+  }
+}
+
+/* State nằm trên wrapper Radix (popper); scale chỉ áp vào surface bên trong để không đè transform định vị */
+[data-slot="dropdown-menu-content"][data-state="open"] .dropdown-menu-player-surface {
+  animation: dropdown-player-open 165ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+[data-slot="dropdown-menu-content"][data-state="closed"] .dropdown-menu-player-surface {
+  animation: dropdown-player-close 115ms cubic-bezier(0.4, 0, 0.85, 1) both;
+}
