@@ -59,36 +59,32 @@ def _build_google_cookie_jar(cookies: list[dict]) -> dict[str, str]:
 
 
 async def validate_auth_live() -> bool:
-    """Validate that saved Google session is usable by notebooklm-py."""
+    """Validate that saved Google session is usable by notebooklm-py by making an API call."""
     if not STORAGE_STATE.exists():
         return False
 
     try:
-        from notebooklm.auth import AuthTokens
+        from notebooklm.client import NotebookLMClient
 
-        tokens = AuthTokens.from_storage(str(STORAGE_STATE))
-        return tokens is not None
-    except Exception:
+        # Load client from storage_state.json and make a lightweight API call
+        async with await NotebookLMClient.from_storage(str(STORAGE_STATE)) as client:
+            await client.notebooks.list()
+            return True
+    except Exception as exc:
+        # Import here to avoid circular dependencies
+        from app.services.runner import _is_notebooklm_auth_error
+
+        if _is_notebooklm_auth_error(exc):
+            return False
+        # Treat any other fatal error as session_expired to force a clean re-login
         return False
 
 
 async def check_auth_status_strict() -> str:
-    """Return auth status using storage check + library validation as fallback.
-
-    Priority:
-      1. File missing → not_logged_in
-      2. Cookies present & not expired → authenticated
-      3. Cookies missing/expired but library can still load → authenticated
-         (some cookie names may differ between versions)
-      4. Otherwise → session_expired
-    """
-    precheck = check_auth_from_storage()
-    if precheck == "not_logged_in":
+    """Return auth status using a live API check as the definitive source of truth."""
+    if not STORAGE_STATE.exists():
         return "not_logged_in"
-    if precheck == "authenticated":
-        return "authenticated"
-    # precheck == "session_expired": cookies missing or expired
-    # Double-check with the library — it may use different cookie names
+
     is_valid = await validate_auth_live()
     return "authenticated" if is_valid else "session_expired"
 
