@@ -58,7 +58,7 @@ def _build_google_cookie_jar(cookies: list[dict]) -> dict[str, str]:
     return jar
 
 
-async def validate_auth_live(timeout_sec: float = 8.0) -> bool:
+async def validate_auth_live() -> bool:
     """Validate that saved Google session is usable by notebooklm-py."""
     if not STORAGE_STATE.exists():
         return False
@@ -67,18 +67,28 @@ async def validate_auth_live(timeout_sec: float = 8.0) -> bool:
         from notebooklm.auth import AuthTokens
 
         tokens = AuthTokens.from_storage(str(STORAGE_STATE))
-        # If from_storage succeeds and returns tokens, the auth is valid
         return tokens is not None
     except Exception:
         return False
 
 
 async def check_auth_status_strict() -> str:
-    """Return auth status using storage pre-check + library validation."""
+    """Return auth status using storage check + library validation as fallback.
+
+    Priority:
+      1. File missing → not_logged_in
+      2. Cookies present & not expired → authenticated
+      3. Cookies missing/expired but library can still load → authenticated
+         (some cookie names may differ between versions)
+      4. Otherwise → session_expired
+    """
     precheck = check_auth_from_storage()
     if precheck == "not_logged_in":
-        return precheck
-    # Use notebooklm-py's own validation instead of httpx
+        return "not_logged_in"
+    if precheck == "authenticated":
+        return "authenticated"
+    # precheck == "session_expired": cookies missing or expired
+    # Double-check with the library — it may use different cookie names
     is_valid = await validate_auth_live()
     return "authenticated" if is_valid else "session_expired"
 
