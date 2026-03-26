@@ -451,7 +451,7 @@ export default function AdminPage() {
           onClose={() => setRemoteLoginOpen(false)}
           onAuthSaved={() => {
             queryClient.invalidateQueries({ queryKey: ["auth-status"] });
-            setSyncMessage("NotebookLM認証が保存されました");
+            setSyncMessage("NotebookLM認証を保存しました。状態が更新されない場合はGoogleに再ログインしてください。");
           }}
         />
       </Suspense>
