@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PlayCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLocale } from "@/lib/locale-context";
+import { VideoAdminMenu } from "@/components/videos/video-admin-menu";
 import type { Video } from "@/lib/types";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -58,9 +59,11 @@ function CategoryAvatar({ slug, name }: { slug?: string; name?: string }) {
 interface VideoCardProps {
   video: Video;
   compact?: boolean;
+  /** Admin の編集・削除メニュー（ホームのグリッドなど） */
+  showAdminMenu?: boolean;
 }
 
-export function VideoCard({ video, compact = false }: VideoCardProps) {
+export function VideoCard({ video, compact = false, showAdminMenu = false }: VideoCardProps) {
   const { t } = useLocale();
   const isReady = video.status === "ready";
   const href = isReady ? `/videos/${video.id}` : "#";
@@ -148,28 +151,35 @@ export function VideoCard({ video, compact = false }: VideoCardProps) {
       </Link>
 
       {/* Info row */}
-      <div className="flex gap-3 mt-3">
+      <div className="flex gap-3 mt-3 items-start">
         {/* Channel avatar */}
         <Link href={`/?category=${video.categorySlug ?? ""}`} className="shrink-0 mt-0.5">
           <CategoryAvatar slug={video.categorySlug} name={video.categoryName} />
         </Link>
 
-        {/* Video details */}
-        <div className="flex-1 min-w-0">
-          <Link href={href}>
-            <h3 className="text-sm font-semibold text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 leading-snug hover:text-black dark:hover:text-white">
-              {video.title}
-            </h3>
-          </Link>
-          <Link href={`/?category=${video.categorySlug ?? ""}`}>
-            <p className="text-xs text-[#606060] dark:text-[#909090] mt-1 hover:text-[#0f0f0f] dark:hover:text-[#f1f1f1] transition-colors">
-              {video.categoryName}
+        {/* Video details + optional admin menu */}
+        <div className="flex-1 min-w-0 flex gap-1 justify-between items-start">
+          <div className="min-w-0 flex-1">
+            <Link href={href}>
+              <h3 className="text-sm font-semibold text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 leading-snug hover:text-black dark:hover:text-white">
+                {video.title}
+              </h3>
+            </Link>
+            <Link href={`/?category=${video.categorySlug ?? ""}`}>
+              <p className="text-xs text-[#606060] dark:text-[#909090] mt-1 hover:text-[#0f0f0f] dark:hover:text-[#f1f1f1] transition-colors">
+                {video.categoryName}
+              </p>
+            </Link>
+            <p className="text-xs text-[#606060] dark:text-[#909090]">
+              {formatViewCount(video.viewCount, t.videoCard.views)}
+              {video.publishedAt && ` • ${timeAgo(video.publishedAt, t)}`}
             </p>
-          </Link>
-          <p className="text-xs text-[#606060] dark:text-[#909090]">
-            {formatViewCount(video.viewCount, t.videoCard.views)}
-            {video.publishedAt && ` • ${timeAgo(video.publishedAt, t)}`}
-          </p>
+          </div>
+          {showAdminMenu ? (
+            <div className="shrink-0 -mr-1 -mt-0.5" onClick={(e) => e.stopPropagation()}>
+              <VideoAdminMenu video={video} />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

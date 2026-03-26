@@ -69,6 +69,7 @@ async def _fail_job(
         steps=steps,
         errorMessage=error_message,
     )
+    await _mark_video_failed_for_job(job_id)
 
 
 async def _wait_for_source_ready(
@@ -252,6 +253,7 @@ async def run_job(
                 "pip install 'notebooklm-py[browser]' を実行してください。"
             ),
         )
+        await _mark_video_failed_for_job(job_id)
         if semaphore is not None:
             semaphore.release()
         return
@@ -576,6 +578,20 @@ def _build_thumbnail_url(video_id: str) -> Optional[str]:
     if not base_url:
         return None
     return urljoin(base_url.rstrip("/") + "/", f"/api/videos/{video_id}/thumbnail")
+
+
+async def _mark_video_failed_for_job(job_id: str) -> None:
+    """ジョブ失敗時、対応する videos レコードがあれば status=error に更新する。"""
+    try:
+        import database as db
+
+        video = await db.get_video_by_job_id(job_id)
+        if video:
+            await db.update_video(video["id"], status="error")
+        else:
+            logger.debug("ジョブ %s に対応する動画レコードなし（動画ステータス更新スキップ）", job_id)
+    except Exception as e:
+        logger.error("ジョブ失敗後の動画ステータス更新エラー job_id=%s: %s", job_id, e)
 
 
 async def _on_job_completed(job_id: str, title: str, thumbnail_generated: bool = False) -> None:
