@@ -15,7 +15,7 @@ import database
 from app.config import FRONTEND_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
 from app.dependencies import require_admin_user
 from app.schemas.auth import AuthStatus, LoginResponse
-from app.services.notebooklm_auth import check_auth_from_storage, find_notebooklm
+from app.services.notebooklm_auth import check_auth_status_strict, find_notebooklm
 from app.services.oauth import allowed_oauth_frontends, oauth_state_decode, oauth_state_encode, resolve_oauth_frontend
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/status", response_model=AuthStatus)
 async def get_auth_status(_admin: Annotated[dict, Depends(require_admin_user)]):
-    return AuthStatus(status=check_auth_from_storage())
+    return AuthStatus(status=await check_auth_status_strict())
 
 
 @router.post("/login", response_model=LoginResponse)

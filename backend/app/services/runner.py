@@ -35,6 +35,19 @@ STEP_IDS = [
 StoreUpdateFn = Callable[..., Awaitable[dict]]
 
 
+def _is_notebooklm_auth_error(exc: Exception) -> bool:
+    raw = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        token in raw
+        for token in (
+            "authentication expired or invalid",
+            "redirected to: https://accounts.google.com",
+            "servicelogin",
+            "accounts.google.com",
+        )
+    )
+
+
 async def _set_step_status(
     store_update: StoreUpdateFn,
     job_id: str,
@@ -552,7 +565,13 @@ async def run_job(
 
         logger.error("Job %s failed at step '%s': %s", job_id, current_step, error_detail)
 
-        error_message = f"予期しないエラーが発生しました: {error_detail}"
+        if _is_notebooklm_auth_error(exc):
+            error_message = (
+                "NotebookLM の認証セッションが無効または期限切れです。"
+                "管理画面の NotebookLM 認証から再ログインして、再度動画生成を実行してください。"
+            )
+        else:
+            error_message = f"予期しないエラーが発生しました: {error_detail}"
         await _fail_job(
             store_update, job_id, steps, current_step,
             error_message,
