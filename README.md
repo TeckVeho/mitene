@@ -63,7 +63,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
 brew install ffmpeg  # macOS（ffprobe も含まれる）
-sudo apt install -y xvfb # virtual display
+sudo apt install -y xvfb # virtual display sudo dnf install -y xorg-x11-server-Xvfb
 # 環境変数（.env.example をコピーして編集）
 cp .env.example .env
 ```
