@@ -1082,53 +1082,18 @@ async def trigger_wiki_sync_directory(
     )
 
     sync_id = f"sync_{uuid.uuid4().hex[:8]}"
-    logger.info(
-        "Wiki sync request received sync_id=%s path=%s paths_count=%d",
-        sync_id,
-        requested_path or "(root)",
-        len(requested_paths or []),
-    )
 
     async def _do_sync():
-        logger.info(
-            "Wiki sync background task started sync_id=%s path=%s paths_count=%d",
-            sync_id,
-            requested_path or "(root)",
-            len(requested_paths or []),
+        await sync_wiki_from_directory(
+            relative_dir=requested_path or "",
+            target_paths=requested_paths,
+            store_update_fn=database.store_update,
+            run_job_fn=run_job,
+            semaphore=_job_semaphore,
+            outputs_dir=OUTPUTS_DIR,
+            sync_id=sync_id,
         )
-        try:
-            result = await sync_wiki_from_directory(
-                relative_dir=requested_path or "",
-                target_paths=requested_paths,
-                store_update_fn=database.store_update,
-                run_job_fn=run_job,
-                semaphore=_job_semaphore,
-                outputs_dir=OUTPUTS_DIR,
-                sync_id=sync_id,
-            )
-            logger.info(
-                "Wiki sync background task finished sync_id=%s status=%s processed=%s jobs_created=%s hash=%s result=%s",
-                sync_id,
-                result.get("status"),
-                result.get("processed"),
-                result.get("jobs_created"),
-                result.get("hash"),
-                result,
-            )
-        except Exception:
-            logger.exception(
-                "Wiki sync background task crashed sync_id=%s path=%s",
-                sync_id,
-                requested_path or "(root)",
-            )
-            raise
 
-    logger.info(
-        "Wiki sync background task scheduled sync_id=%s path=%s paths_count=%d",
-        sync_id,
-        requested_path or "(root)",
-        len(requested_paths or []),
-    )
     background_tasks.add_task(_do_sync)
     return {"message": "ディレクトリの動画作成を開始しました", "sync_id": sync_id}
 
