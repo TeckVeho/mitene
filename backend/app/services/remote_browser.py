@@ -12,6 +12,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Optional
@@ -41,6 +44,7 @@ class RemoteBrowserSession:
         self._page = None
         self._running = False
         self._lock = asyncio.Lock()
+        self._xvfb_proc: Optional[subprocess.Popen] = None
 
     @property
     def is_running(self) -> bool:
@@ -53,6 +57,18 @@ class RemoteBrowserSession:
                 raise RuntimeError("A remote login session is already running.")
 
             from playwright.async_api import async_playwright
+
+            # Auto-start Xvfb virtual display if no $DISPLAY on headless servers
+            if not os.environ.get("DISPLAY") and shutil.which("Xvfb"):
+                display_num = "99"
+                self._xvfb_proc = subprocess.Popen(
+                    ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24", "-ac"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                os.environ["DISPLAY"] = f":{display_num}"
+                await asyncio.sleep(0.5)
+                logger.info("Started Xvfb virtual display on :%s", display_num)
 
             self._playwright = await async_playwright().start()
 
@@ -156,6 +172,15 @@ class RemoteBrowserSession:
                 await self._playwright.stop()
         except Exception as e:
             logger.warning("Error stopping playwright: %s", e)
+        # Stop Xvfb if we started it
+        if self._xvfb_proc:
+            try:
+                self._xvfb_proc.terminate()
+                self._xvfb_proc.wait(timeout=5)
+                logger.info("Stopped Xvfb virtual display.")
+            except Exception as e:
+                logger.warning("Error stopping Xvfb: %s", e)
+            self._xvfb_proc = None
         self._context = None
         self._page = None
         self._playwright = None
