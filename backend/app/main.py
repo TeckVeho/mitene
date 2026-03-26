@@ -21,7 +21,7 @@ import app.config  # noqa: F401 — load_dotenv before database reads env
 import database
 from app.config import _CORS_ORIGINS
 from app.job_runtime import job_semaphore
-from app.routers import admin, auth, categories, comments, jobs, settings, users, videos, wiki
+from app.routers import admin, auth, categories, comments, jobs, remote_login, settings, users, videos, wiki
 from app.routers.v1 import register_store_functions, router as v1_router
 from app.services.jobs import initial_steps
 from app.services.runner import run_job
@@ -86,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(comments.router)
     app.include_router(wiki.router)
     app.include_router(admin.router)
+    app.include_router(remote_login.router)
 
     return app
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "@/lib/locale-context";
@@ -15,8 +15,11 @@ import {
   BookOpen,
   FolderOpen,
   Play,
+  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const RemoteLoginModal = lazy(() => import("@/components/auth/RemoteLoginModal"));
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -62,6 +65,7 @@ export default function AdminPage() {
   const queryClient = useQueryClient();
   const { t, locale } = useLocale();
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [remoteLoginOpen, setRemoteLoginOpen] = useState(false);
   const AUTH_CONFIG = getAuthConfig(t);
 
   const { data: gateUser, isLoading: gateAuthLoading } = useQuery({
@@ -363,19 +367,30 @@ export default function AdminPage() {
             </p>
 
             {authState !== "authenticated" && (
-              <Button
-                size="sm"
-                className="w-full gap-1.5"
-                onClick={() => triggerLogin()}
-                disabled={isLoggingIn}
-              >
-                {isLoggingIn ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <LogIn className="size-3.5" />
-                )}
-                {authState === "session_expired" ? t.admin.reLogin : t.common.login}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="flex-1 gap-1.5"
+                  onClick={() => setRemoteLoginOpen(true)}
+                >
+                  <Monitor className="size-3.5" />
+                  Remote Login
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => triggerLogin()}
+                  disabled={isLoggingIn}
+                >
+                  {isLoggingIn ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <LogIn className="size-3.5" />
+                  )}
+                  CLI
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -429,6 +444,17 @@ export default function AdminPage() {
           )}
         </CardContent>
       </Card>
+      {/* Remote Login Modal */}
+      <Suspense fallback={null}>
+        <RemoteLoginModal
+          open={remoteLoginOpen}
+          onClose={() => setRemoteLoginOpen(false)}
+          onAuthSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+            setSyncMessage("NotebookLM認証が保存されました");
+          }}
+        />
+      </Suspense>
     </div>
   );
 }
