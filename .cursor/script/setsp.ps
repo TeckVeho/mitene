@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <issue_url> <sp_value>" >&2
+  exit 1
+fi
+
+issue_url=$1
+sp_value=$2
+
+if [[ -n "${GH_CLI:-}" ]]; then
+  GH_BIN=$GH_CLI
+elif [[ -x "/mnt/c/Program Files/GitHub CLI/gh.exe" ]]; then
+  GH_BIN="/mnt/c/Program Files/GitHub CLI/gh.exe"
+elif command -v gh >/dev/null 2>&1; then
+  GH_BIN=$(command -v gh)
+else
+  echo "GitHub CLI (gh) is required." >&2
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required." >&2
+  exit 1
+fi
+
+run_graphql() {
+  local payload=$1
+  local tmpdir=${TMPDIR:-${HOME:-/tmp}}
+  local tmpfile output
+  tmpfile=$(mktemp "$tmpdir/gh_payload.XXXXXX")
+  printf '%s\n' "$payload" >"$tmpfile"
+  local input_path="$tmpfile"
+  if [[ "$GH_BIN" == *".exe" ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      input_path=$(wslpath -w "$tmpfile")
+    fi
+  fi
+  if ! output=$("$GH_BIN" api graphql --input "$input_path"); then
+    rm -f "$tmpfile"
+    return 1
+  fi
+  rm -f "$tmpfile"
+  printf '%s' "$output"
+}
+
+if [[ $issue_url =~ github\.com/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+  owner=${BASH_REMATCH[1]}
+  repo=${BASH_REMATCH[2]}
+  issue_number=${BASH_REMATCH[3]}
+else
+  echo "Invalid issue URL format." >&2
+  exit 1
+fi
+
+printf 'Target Issue: %s/%s#%s\n' "$owner" "$repo" "$issue_number"
+printf 'SP Value to Set: %s\n\n' "$sp_value"
+
+issue_query=$(cat <<'EOF'
+query($owner:String!, $repo:String!, $issue_number:Int!) {
+  repository(owner:$owner, name:$repo) {
+    issue(number:$issue_number) {
+      id
+      projectItems(first: 10) {
+        nodes {
+          id
+          project {
+            id
+            title
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+)
+
+issue_payload=$(jq -n \
+  --arg query "$issue_query" \
+  --arg owner "$owner" \
+  --arg repo "$repo" \
+  --arg issue_number "$issue_number" \
+  '{query:$query, variables:{owner:$owner, repo:$repo, issue_number: ($issue_number|tonumber)}}')
+
+if ! issue_response=$(run_graphql "$issue_payload"); then
+  echo "Failed to fetch issue information." >&2
+  exit 1
+fi
+
+project_nodes=$(echo "$issue_response" | jq '.data.repository.issue.projectItems.nodes')
+if [[ $(echo "$project_nodes" | jq 'length') -eq 0 ]]; then
+  echo "No project found."
+  exit 0
+fi
+
+field_query=$(cat <<'EOF'
+query($project_id:ID!) {
+  node(id:$project_id) {
+    ... on ProjectV2 {
+      fields(first:50) {
+        nodes {
+          ... on ProjectV2FieldCommon {
+            id
+            name
+            dataType
+          }
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            dataType
+            options { id name }
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+)
+
+while IFS= read -r item; do
+  project_id=$(echo "$item" | jq -r '.project.id')
+  project_title=$(echo "$item" | jq -r '.project.title')
+  item_id=$(echo "$item" | jq -r '.id')
+
+  printf 'Project: %s\n' "$project_title"
+  printf 'Project ID: %s\n' "$project_id"
+  printf 'Item ID: %s\n' "$item_id"
+
+  field_payload=$(jq -n \
+    --arg query "$field_query" \
+    --arg project_id "$project_id" \
+    '{query:$query, variables:{project_id:$project_id}}')
+
+  if ! field_response=$(run_graphql "$field_payload"); then
+    echo "Failed to fetch project fields."
+    echo
+    continue
+  fi
+  fields=$(echo "$field_response" | jq '.data.node.fields.nodes')
+  if [[ $(echo "$fields" | jq 'length') -eq 0 ]]; then
+    echo "No fields found."
+    echo
+    continue
+  fi
+
+  sp_field=$(echo "$fields" | jq -c '
+    map(select(
+      ((.name // "") | gsub("[^A-Za-z0-9]";"") | ascii_downcase) as $n |
+      ($n == "sp" or $n == "storypoint" or $n == "storypoints" or ($n | contains("storypoint")))
+    )) | .[0] // empty
+  ')
+
+  if [[ -z $sp_field ]]; then
+    echo "No SP-like field."
+    echo
+    continue
+  fi
+
+  field_id=$(echo "$sp_field" | jq -r '.id')
+  field_type=$(echo "$sp_field" | jq -r '.dataType')
+  field_name=$(echo "$sp_field" | jq -r '.name')
+
+  printf 'Found SP Field: %s (Type: %s, ID: %s)\n' "$field_name" "$field_type" "$field_id"
+
+  mutation=""
+  variables=""
+
+  case "$field_type" in
+    NUMBER)
+      if ! [[ $sp_value =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+        echo "SP value '$sp_value' is not numeric but NUMBER field expected."
+        echo
+        continue
+      fi
+      mutation=$(cat <<'EOF'
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $number: Float!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { number: $number }
+    }
+  ) { projectV2Item { id } }
+}
+EOF
+)
+      variables=$(jq -n \
+        --arg projectId "$project_id" \
+        --arg itemId "$item_id" \
+        --arg fieldId "$field_id" \
+        --arg sp "$sp_value" \
+        '{projectId:$projectId, itemId:$itemId, fieldId:$fieldId, number: ($sp|tonumber)}')
+      ;;
+    TEXT)
+      mutation=$(cat <<'EOF'
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $text: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { text: $text }
+    }
+  ) { projectV2Item { id } }
+}
+EOF
+)
+      variables=$(jq -n \
+        --arg projectId "$project_id" \
+        --arg itemId "$item_id" \
+        --arg fieldId "$field_id" \
+        --arg text "$sp_value" \
+        '{projectId:$projectId, itemId:$itemId, fieldId:$fieldId, text:$text}')
+      ;;
+    SINGLE_SELECT)
+      option=$(echo "$sp_field" | jq -c --arg sp "$sp_value" '.options[]? | select(.name == $sp)')
+      if [[ -z $option ]]; then
+        echo "No matching option for '$sp_value'"
+        echo "Available options:"
+        echo "$sp_field" | jq -r '.options[]?.name' | sed 's/^/ - /'
+        echo
+        continue
+      fi
+      option_id=$(echo "$option" | jq -r '.id')
+      option_name=$(echo "$option" | jq -r '.name')
+      printf 'Selected single select option: %s (%s)\n' "$option_name" "$option_id"
+
+      mutation=$(cat <<'EOF'
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { singleSelectOptionId: $optionId }
+    }
+  ) { projectV2Item { id } }
+}
+EOF
+)
+      variables=$(jq -n \
+        --arg projectId "$project_id" \
+        --arg itemId "$item_id" \
+        --arg fieldId "$field_id" \
+        --arg optionId "$option_id" \
+        '{projectId:$projectId, itemId:$itemId, fieldId:$fieldId, optionId:$optionId}')
+      ;;
+    *)
+      echo "Unsupported type: $field_type"
+      echo
+      continue
+      ;;
+  esac
+
+  payload=$(jq -n \
+    --arg query "$mutation" \
+    --argjson variables "$variables" \
+    '{query:$query, variables:$variables}')
+
+  echo "Running mutation..."
+  if ! result=$(run_graphql "$payload"); then
+    echo "Mutation failed."
+    echo
+    continue
+  fi
+
+  echo "$result"
+  echo "Mutation finished."
+  echo
+done < <(echo "$project_nodes" | jq -c '.[]')
