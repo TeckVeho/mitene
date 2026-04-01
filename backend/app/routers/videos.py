@@ -44,7 +44,12 @@ async def get_videos(
         for v in videos:
             v["watch_later"] = v["id"] in watch_later_ids
             v["liked"] = v["id"] in liked_ids
-    return [video_dict_to_response(v) for v in videos]
+    ids = [v["id"] for v in videos]
+    watch_counts = await database.get_video_watch_counts_batch(ids)
+    return [
+        video_dict_to_response(v, *watch_counts.get(v["id"], (0, 0)))
+        for v in videos
+    ]
 
 
 @router.get("/{video_id}", response_model=VideoResponse)

@@ -102,7 +102,12 @@ async def get_watch_later(
         v["watched"] = v["id"] in watched_ids
         v["watch_later"] = True
         v["liked"] = v["id"] in liked_ids
-    return [video_dict_to_response(v) for v in videos]
+    ids = [v["id"] for v in videos]
+    watch_counts = await database.get_video_watch_counts_batch(ids)
+    return [
+        video_dict_to_response(v, *watch_counts.get(v["id"], (0, 0)))
+        for v in videos
+    ]
 
 
 @router.get("/me/liked", response_model=list[VideoResponse])
@@ -122,4 +127,9 @@ async def get_liked_videos(
         v["watched"] = v["id"] in watched_ids
         v["watch_later"] = v["id"] in watch_later_ids
         v["liked"] = True
-    return [video_dict_to_response(v) for v in videos]
+    ids = [v["id"] for v in videos]
+    watch_counts = await database.get_video_watch_counts_batch(ids)
+    return [
+        video_dict_to_response(v, *watch_counts.get(v["id"], (0, 0)))
+        for v in videos
+    ]

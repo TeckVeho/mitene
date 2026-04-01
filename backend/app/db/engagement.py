@@ -114,6 +114,41 @@ async def get_video_watch_counts(video_id: str) -> tuple[int, int]:
     return (cnt, cnt)
 
 
+async def get_video_watch_counts_batch(video_ids: list[str]) -> dict[str, tuple[int, int]]:
+    """複数動画の視聴者数・視聴回数（get_video_watch_counts と同じ定義）を一括取得"""
+    if not video_ids:
+        return {}
+    if not _USE_MYSQL:
+        wanted = set(video_ids)
+        counts: dict[str, int] = {}
+        async with _elearning_lock:
+            for h in _watch_history_store:
+                vid = h["video_id"]
+                if vid in wanted:
+                    counts[vid] = counts.get(vid, 0) + 1
+        return {vid: (c, c) for vid, c in counts.items()}
+
+    placeholders = ",".join(["%s"] * len(video_ids))
+    async with connection._pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT video_id, COUNT(*) AS cnt
+                FROM watch_history
+                WHERE video_id IN ({placeholders})
+                GROUP BY video_id
+                """,
+                video_ids,
+            )
+            rows = await cur.fetchall()
+    out: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        cnt = int(r["cnt"])
+        vid = r["video_id"]
+        out[vid] = (cnt, cnt)
+    return out
+
+
 async def toggle_watch_later(user_id: str, video_id: str) -> bool:
     """後で見るをトグル。追加ならTrue、削除ならFalseを返す"""
     if not _USE_MYSQL:

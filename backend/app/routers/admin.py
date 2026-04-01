@@ -35,11 +35,12 @@ async def get_admin_videos(
         language=None,
         published_after=None,
     )
-    out: list[VideoResponse] = []
-    for v in videos:
-        vc, vv = await database.get_video_watch_counts(v["id"])
-        out.append(video_dict_to_response(v, vc, vv))
-    return out
+    ids = [v["id"] for v in videos]
+    watch_counts = await database.get_video_watch_counts_batch(ids)
+    return [
+        video_dict_to_response(v, *watch_counts.get(v["id"], (0, 0)))
+        for v in videos
+    ]
 
 
 @router.patch("/videos/{video_id}", response_model=VideoResponse)
