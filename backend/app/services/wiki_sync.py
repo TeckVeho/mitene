@@ -257,8 +257,10 @@ def get_wiki_directories() -> list[dict]:
     返却形式: [{"path": "", "label": "ルート", "count": 2}, {"path": "security", "label": "security", "count": 5}, ...]
     """
     local_path = os.path.abspath(WIKI_GIT_LOCAL_PATH)
-    if not Path(local_path).exists():
-        _clone_or_pull(WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH)
+    
+    # 常に同期して最新情報をリストアップする
+    _clone_or_pull(WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH, quiet=False)
+    
     if not Path(local_path).exists():
         return []
 
