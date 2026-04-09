@@ -151,18 +151,26 @@ def _clone_or_pull(
                 logger.warning("git remote set-url 失敗: %s", set_url_result.stderr)
         return True, _get_commit_hash(str(path), quiet=quiet)
 
-    # 既存リポジトリをpull
+    # 既存リポジトリを同期(fetch & reset --hard)
     old_hash = _get_commit_hash(str(path), quiet=quiet)
     if not quiet:
-        logger.info("Git pull 実行中: %s (branch: %s)", local_path, branch)
+        logger.info("Git 同期実行中: %s (branch: %s)", local_path, branch)
     pull_target = auth_repo_url if auth_repo_url else "origin"
     if pull_target != "origin" and not quiet:
-        logger.info("Git pull 実行先: %s", _redact_url_for_log(pull_target))
-    result = _run_git(["pull", pull_target, branch], str(path))
-    if result.returncode != 0:
+        logger.info("Git fetch 実行先: %s", _redact_url_for_log(pull_target))
+    
+    fetch_result = _run_git(["fetch", pull_target, branch], str(path))
+    if fetch_result.returncode != 0:
         if not quiet:
-            logger.warning("git pull 失敗（オフラインまたは権限エラー）: %s", result.stderr)
+            logger.warning("git fetch 失敗（オフラインまたは権限エラー）: %s", fetch_result.stderr)
         return True, old_hash  # エラーでも既存ファイルを処理
+    
+    reset_result = _run_git(["reset", "--hard", "FETCH_HEAD"], str(path))
+    if reset_result.returncode != 0:
+        if not quiet:
+            logger.warning("git reset 失敗: %s", reset_result.stderr)
+        return True, old_hash
+
     new_hash = _get_commit_hash(str(path), quiet=quiet)
     return True, new_hash
 
