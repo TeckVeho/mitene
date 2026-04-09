@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and adjust.
+
+project_id = "your-gcp-project-id"
+region     = "asia-northeast1"
+env_suffix = "dev"
+
+# Optional overrides:
+# network_name                   = "mitene-vpc-dev"
+# connector_subnet_cidr          = "10.8.0.0/28"
+# private_service_peering_cidr   = "10.247.0.0"
+# private_service_peering_prefix_length = 16

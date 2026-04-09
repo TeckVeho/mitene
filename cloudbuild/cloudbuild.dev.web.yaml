@@ -1,0 +1,34 @@
+# Cloud Build — dev web image (Mitene Next.js)
+# Submit from mitene repository root (set API URL to your Cloud Run API URL):
+#   gcloud builds submit --config=cloudbuild/cloudbuild.dev.web.yaml \
+#     --substitutions=_NEXT_PUBLIC_API_URL=https://YOUR-API-URL.run.app/api
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mitene-web:${_TAG} || true
+        docker build \
+          --build-arg NEXT_PUBLIC_API_URL=${_NEXT_PUBLIC_API_URL} \
+          --cache-from ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mitene-web:${_TAG} \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mitene-web:${_TAG} \
+          .
+    dir: 'frontend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mitene-web:${_TAG}'
+
+substitutions:
+  _REGION: asia-northeast1
+  _REPO: mitene-docker
+  _TAG: dev
+  _NEXT_PUBLIC_API_URL: 'https://mitene-api-dev-REPLACE.run.app/api'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'

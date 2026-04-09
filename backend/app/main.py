@@ -2,15 +2,14 @@
 E-learning バックエンド API — application factory.
 
 ストレージ:
-  - DATABASE_URL 環境変数が設定されている場合: MySQL（RDS）
-  - 未設定の場合: インメモリ（開発用）
-  - S3_BUCKET_NAME 環境変数が設定されている場合: AWS S3 にファイル保存
-  - 未設定の場合: ローカルファイルシステム（開発用）
+  - DATABASE_URL: MySQL（未設定時はインメモリ）
+  - resolve_storage_kind: GCS_BUCKET → GCS、次に S3 設定 → S3、それ以外はローカル（STORAGE_BACKEND で上書き可）
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -24,10 +23,12 @@ from app.job_runtime import job_semaphore
 from app.routers import admin, auth, categories, comments, jobs, remote_login, settings, users, videos, wiki
 from app.routers.v1 import register_store_functions, router as v1_router
 from app.services.jobs import initial_steps
+from app.services.notebooklm_gcs import download_storage_state_if_configured
 from app.services.runner import run_job
 
+_log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _log_level_name, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logging.getLogger("notebooklm").setLevel(logging.DEBUG)
@@ -35,6 +36,7 @@ logging.getLogger("notebooklm").setLevel(logging.DEBUG)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    download_storage_state_if_configured()
     await database.init_db()
     raw_store, raw_lock = database.get_raw_store()
     register_store_functions(
@@ -87,6 +89,11 @@ def create_app() -> FastAPI:
     app.include_router(wiki.router)
     app.include_router(admin.router)
     app.include_router(remote_login.router)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        """Liveness/readiness for load balancers and Cloud Run optional HTTP probes."""
+        return {"status": "ok"}
 
     return app
 

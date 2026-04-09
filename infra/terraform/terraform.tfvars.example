@@ -1,0 +1,53 @@
+# Copy to terraform.tfvars (do not commit secrets).
+
+project_id  = "your-gcp-project-id"
+env_suffix  = "dev"
+
+container_image = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/mitene-docker/mitene-api:dev"
+
+container_port = 8080
+
+env_vars = {
+  PYTHONUNBUFFERED   = "1"
+  STORAGE_BACKEND      = "gcs"
+  CORS_ALLOWED_ORIGINS = "https://REPLACE-WITH-WEB-CLOUD-RUN-URL"
+  FRONTEND_URL         = "https://REPLACE-WITH-WEB-CLOUD-RUN-URL"
+  API_BASE_URL         = "https://REPLACE-WITH-API-CLOUD-RUN-URL"
+}
+
+web_env_vars = {
+  NODE_ENV = "production"
+  # Runtime-only; client bundle uses build-time NEXT_PUBLIC_* from Docker/Cloud Build
+}
+
+# --- GCS uploads bucket (default: on) ---
+# enable_gcs = true
+# gcs_bucket_name = ""
+# gcs_force_destroy = false
+
+# --- Cloud SQL ---
+# enable_cloud_sql       = true
+# sql_tier               = "db-f1-micro"
+# sql_disk_size_gb       = 10
+# sql_database_name      = "mitene"
+# sql_user_name          = "mitene"
+# sql_deletion_protection = false
+
+# Optional: Next.js Cloud Run
+# enable_web             = true
+# web_container_image    = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/mitene-docker/mitene-web:dev"
+# web_cloud_run_service_name = "mitene-web-dev"
+
+# Optional overrides:
+# region                 = "asia-northeast1"
+# cloud_run_service_name = "mitene-api-dev"
+# web_container_port     = 3000
+
+# Public .run.app (allUsers invoker). Use true for public dev; prod often false + IAP/LB.
+# allow_unauthenticated     = true
+# allow_unauthenticated_web = true
+
+# --- Cloud SQL + private IP (when enable_cloud_sql) ---
+# Apply network stack first; bucket/prefix must match network backend.
+# network_remote_state_bucket  = "your-terraform-state-bucket"
+# network_remote_state_prefix  = "network/dev"

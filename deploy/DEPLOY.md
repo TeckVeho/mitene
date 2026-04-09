@@ -1,5 +1,7 @@
 # mitene (V-learning) AWS デプロイ手順書
 
+**Google Cloud Run (GCP)** を使う場合は **[CLOUD_RUN.md](CLOUD_RUN.md)** を参照してください（Terraform / Cloud Build / Docker）。
+
 ## 0. GitHub へのプッシュ（初回のみ）
 
 プロジェクトルート（`mitene/`）に Git リポジトリを作成して push します。
