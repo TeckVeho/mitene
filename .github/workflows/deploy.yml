@@ -17,14 +17,14 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Setup SSH
         uses: ./.github/actions/setup-ssh
         with:
           ssh_key: ${{ secrets.SSH_PRIVATE_KEY }}
           host: ${{ secrets.SSH_HOST }}
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
       
@@ -62,13 +62,13 @@ jobs:
         working-directory: frontend
         
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Setup SSH
         uses: ./.github/actions/setup-ssh
         with:
           ssh_key: ${{ secrets.SSH_PRIVATE_KEY }}
           host: ${{ secrets.SSH_HOST }}
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ vars.NODE_VERSION }}
 
