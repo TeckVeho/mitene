@@ -28,8 +28,8 @@ variable "network_name" {
 
 variable "connector_subnet_cidr" {
   type        = string
-  default     = "10.8.0.0/28"
-  description = "Regional subnet for Serverless VPC Access (Cloud Run). Must not overlap the private service peering range."
+  default     = "10.8.0.0/24"
+  description = "Regional subnet for Cloud Run Direct VPC Egress. Must not overlap the private service peering range."
 }
 
 variable "private_service_peering_cidr" {

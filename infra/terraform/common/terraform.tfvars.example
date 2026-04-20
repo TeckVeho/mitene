@@ -1,0 +1,23 @@
+project_id = "my-project-common"
+region     = "asia-northeast1"
+
+# artifact_repo_id = "mitene-docker"
+
+# App projects that run Cloud Run and pull images from this registry:
+reader_project_ids = [
+  "my-project-dev",
+  "my-project-stg",
+  "my-project-prod",
+]
+
+# optional: e.g. Cloud Run Service Agent for cross-project image pull (per app project number):
+# gcloud projects describe APP_PROJECT_ID --format='value(projectNumber)' → service-{N}@serverless-robot-prod.iam.gserviceaccount.com
+# additional_artifact_registry_reader_members = [
+#   "serviceAccount:service-123456789012@serverless-robot-prod.iam.gserviceaccount.com",
+# ]
+
+# Cloud Build SA(s) that push images (roles/artifactregistry.writer). Use the numeric
+# project number of the project where the build runs: gcloud projects describe PROJECT_ID --format='value(projectNumber)'
+# additional_artifact_registry_writer_members = [
+#   "serviceAccount:123456789012@cloudbuild.gserviceaccount.com",
+# ]

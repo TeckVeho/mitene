@@ -4,9 +4,18 @@
 DATABASE_URL 環境変数が設定されている場合は MySQL（RDS）を使用し、
 未設定の場合はインメモリストアにフォールバックする（開発環境向け）。
 
-DATABASE_URL 形式:
-  mysql://user:password@host:3306/dbname
-  mysql+aiomysql://user:password@host:3306/dbname
+DATABASE_URL 形式（いずれも mysql:// または mysql+aiomysql://）:
+
+  TCP（ローカル MySQL・Docker・RDS・プライベート IP など同一ネットワーク上のホスト名）:
+    mysql://user:password@localhost:3306/dbname
+    mysql://user:password@your-rds.region.rds.amazonaws.com:3306/dbname
+    ポート省略時は 3306。
+
+  Unix ソケット（Cloud SQL Auth Proxy / Cloud Run の /cloudsql マウント・ローカル mysqld.sock）:
+    mysql://user:password@localhost/dbname?socket=/cloudsql/PROJECT:REGION:INSTANCE
+    mysql://user:password@/dbname?unix_socket=/var/run/mysqld/mysqld.sock
+  クエリ名は ``socket``（Terraform）と ``unix_socket``（一般的）の両方を受理する。
+  ソケット指定時は TCP の host/port は使わない。
 """
 
 import asyncio
@@ -15,7 +24,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import parse_qs, urlparse, unquote
 
 logger = logging.getLogger(__name__)
 
@@ -204,12 +213,21 @@ def _now() -> str:
 def _parse_mysql_url(url: str) -> dict:
     normalized = url.replace("mysql+aiomysql://", "mysql://")
     parsed = urlparse(normalized)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    # Terraform cloudsql.tf uses ?socket=/cloudsql/... (Unix socket; host is placeholder).
+    unix_socket: Optional[str] = None
+    for key in ("socket", "unix_socket"):
+        if key in query and query[key] and query[key][0]:
+            unix_socket = unquote(query[key][0])
+            break
+    db_raw = parsed.path.lstrip("/").split("?")[0]
     return {
-        "host": parsed.hostname or "localhost",
+        "host": parsed.hostname or ("localhost" if not unix_socket else ""),
         "port": parsed.port or 3306,
         "user": unquote(parsed.username) if parsed.username else "root",
         "password": unquote(parsed.password) if parsed.password else "",
-        "db": parsed.path.lstrip("/"),
+        "db": unquote(db_raw) if db_raw else "",
+        "unix_socket": unix_socket,
     }
 
 
@@ -235,18 +253,22 @@ async def init_db() -> None:
         )
 
     params = _parse_mysql_url(DATABASE_URL)
-    _pool = await aiomysql.create_pool(
-        host=params["host"],
-        port=params["port"],
-        user=params["user"],
-        password=params["password"],
-        db=params["db"],
-        autocommit=True,
-        charset="utf8mb4",
-        cursorclass=aiomysql.DictCursor,
-        minsize=2,
-        maxsize=10,
-    )
+    pool_kw: dict = {
+        "user": params["user"],
+        "password": params["password"],
+        "db": params["db"],
+        "autocommit": True,
+        "charset": "utf8mb4",
+        "cursorclass": aiomysql.DictCursor,
+        "minsize": 2,
+        "maxsize": 10,
+    }
+    if params.get("unix_socket"):
+        pool_kw["unix_socket"] = params["unix_socket"]
+    else:
+        pool_kw["host"] = params["host"] or "localhost"
+        pool_kw["port"] = params["port"]
+    _pool = await aiomysql.create_pool(**pool_kw)
 
     async with _pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -266,7 +288,10 @@ async def init_db() -> None:
                 except Exception:
                     pass
 
-    logger.info("MySQL 接続プールを初期化しました（host=%s, db=%s）", params["host"], params["db"])
+    if params.get("unix_socket"):
+        logger.info("MySQL 接続プールを初期化しました（unix_socket=%s, db=%s）", params["unix_socket"], params["db"])
+    else:
+        logger.info("MySQL 接続プールを初期化しました（host=%s, db=%s）", params["host"], params["db"])
 
 
 def _init_in_memory_defaults():

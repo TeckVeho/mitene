@@ -1,0 +1,13 @@
+{
+  "name": "sql-activation",
+  "version": "1.0.0",
+  "description": "Cloud Functions Gen2: patch Cloud SQL activationPolicy (JST schedule)",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.0",
+    "googleapis": "^131.0.0"
+  }
+}

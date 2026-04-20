@@ -1,7 +1,7 @@
-# Rename to backend.tf and set bucket/prefix. Create the bucket first if needed.
+# Partial GCS backend — bucket/prefix nằm trong backend.tf.dev hoặc backend.tf.prod.
+# Init (chọn một):
+#   terraform init -reconfigure -backend-config=backend.tf.dev
+#   terraform init -reconfigure -backend-config=backend.tf.prod
 terraform {
-  backend "gcs" {
-    bucket = "YOUR-TERRAFORM-STATE-BUCKET"
-    prefix = "network/dev"
-  }
+  backend "gcs" {}
 }

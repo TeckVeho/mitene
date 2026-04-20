@@ -1,0 +1,3 @@
+# GCS backend — dev. Dùng với: terraform init -reconfigure -backend-config=backend.tf.dev
+bucket = "veho-mitene-common-terraform-state"
+prefix = "network/dev"

@@ -1,50 +1,34 @@
-# Mitene — Google Cloud Build
+# Cloud Build configs
 
-Build and push container images to **Artifact Registry** (`mitene-docker` repository; create via Terraform or `gcloud`).
+YAML files in this directory build Docker images and (for `cloudbuild.*.yaml` without `-api`/`-web` suffix) deploy to Cloud Run. Image URLs use **`_AR_PROJECT_ID`** (Artifact Registry / common project) and deploy steps use **`_DEPLOY_PROJECT_ID`** (app project). If those substitutions are empty, steps fall back to **`$PROJECT_ID`** (the project where the build runs).
 
-Prerequisites:
+## Branch triggers (example)
 
-- `gcloud` CLI authenticated (`gcloud auth login`)
-- Project set: `gcloud config set project YOUR_PROJECT_ID`
-- Artifact Registry repository exists (e.g. `mitene-docker`, Docker format, same region as `_REGION`)
+Create one trigger per branch (or use regex) in the GCP project where builds execute. Set **Substitution variables** so each environment gets the right registry and deploy target.
 
-## API (FastAPI)
+| Branch (example) | Config file | Typical substitutions |
+|------------------|-------------|------------------------|
+| `develop` | `cloudbuild.dev.yaml` | `_AR_PROJECT_ID=<common-project>`, `_DEPLOY_PROJECT_ID=<dev-project>`, `_TAG=dev`, `_NEXT_PUBLIC_*` → dev URLs |
+| `staging` | Reuse `cloudbuild.dev*.yaml` with `_TAG=stage` (or dedicated stg YAML) | `_DEPLOY_PROJECT_ID` → staging app project |
+| `main` | `cloudbuild.prod.yaml` | `_AR_PROJECT_ID=<common-project>`, `_DEPLOY_PROJECT_ID=<prod-project>`, `_TAG=prod`, `_NEXT_PUBLIC_*` → prod URLs |
 
-From the **repository root** (parent of `backend/`):
+**IAM — Cloud Build execution SA**
 
-```bash
-# Dev tag
-gcloud builds submit --config=cloudbuild/cloudbuild.dev.api.yaml .
+GCP uses either the legacy Cloud Build SA (`PROJECT_NUMBER@cloudbuild.gserviceaccount.com`) or the Compute Engine default SA (`PROJECT_NUMBER-compute@developer.gserviceaccount.com`) to **execute** builds. This SA needs:
 
-# Production tag
-gcloud builds submit --config=cloudbuild/cloudbuild.prod.api.yaml .
-```
+- **`roles/storage.objectAdmin`** on the build project — read source from `gs://PROJECT_ID_cloudbuild`.
+- **`roles/artifactregistry.writer`** on the **common** Artifact Registry project (see [`infra/terraform/common`](../infra/terraform/common) variable `additional_artifact_registry_writer_members`).
+- **`roles/logging.logWriter`** on the build project — full step logs in Cloud Logging (optional but recommended).
+- **`roles/run.admin`** + **`roles/iam.serviceAccountUser`** on **`_DEPLOY_PROJECT_ID`** (the app project, e.g. `veho-mitene`) so `gcloud run deploy` succeeds — **not** only on the project where `gcloud builds submit` runs.
 
-## Web (Next.js standalone)
+Check which SA your project uses: **Cloud Build → Settings** in Console. See [`GITHUB_ACTIONS_WIF.md`](GITHUB_ACTIONS_WIF.md) Step 6 for full commands.
 
-Set `NEXT_PUBLIC_API_URL` to the **public URL of the Mitene API**, including the `/api` path prefix (see `frontend/.env.example`).
+**Split configs** (`*-api.yaml`, `*-web.yaml`): build, push, then deploy the matching Cloud Run service (API or web only). Set `_AR_PROJECT_ID` when the registry lives in the common project.
 
-```bash
-gcloud builds submit --config=cloudbuild/cloudbuild.dev.web.yaml \
-  --substitutions=_NEXT_PUBLIC_API_URL=https://mitene-api-dev-xxxxx.asia-northeast1.run.app/api
-```
+**GitHub Actions** — [`.github/workflows/cd-gcp.yml`](../.github/workflows/cd-gcp.yml) passes `--substitutions` including `_AR_PROJECT_ID` / `_DEPLOY_PROJECT_ID` from Environment variables **`GCP_AR_PROJECT_ID`** / **`GCP_DEPLOY_PROJECT_ID`**. The workflow resolves empty values to `$PROJECT_ID` in bash **before** calling `gcloud builds submit`, so Cloud Build YAML only contains `${_*}` substitutions. See [`GITHUB_ACTIONS_WIF.md`](GITHUB_ACTIONS_WIF.md).
 
-```bash
-gcloud builds submit --config=cloudbuild/cloudbuild.prod.web.yaml \
-  --substitutions=_NEXT_PUBLIC_API_URL=https://api.your-domain.com/api
-```
+See also [`scripts/gcp/README.md`](../scripts/gcp/README.md).
 
-## Substitutions
+## Cloud Build substitution syntax
 
-| Variable | Default (in YAML) | Purpose |
-|----------|-------------------|---------|
-| `_REGION` | `asia-northeast1` | Region for Artifact Registry image URL |
-| `_REPO` | `mitene-docker` | Artifact Registry repository id |
-| `_TAG` | `dev` / `prod` | Image tag |
-| `_NEXT_PUBLIC_API_URL` | placeholder | **Web only** — baked into the client bundle at build time |
-
-`NEXT_PUBLIC_*` variables are **compile-time** for the Next.js client; set them via Cloud Build `--substitutions` (or Dockerfile `ARG`/`ENV`) when building the web image — not only at Cloud Run runtime.
-
-After images exist, point Terraform `container_image` / `web_container_image` at:
-
-`REGION-docker.pkg.dev/PROJECT_ID/mitene-docker/mitene-api:TAG`
+All YAML files use only Cloud Build user-defined substitutions (`${_TAG}`, `${_AR_PROJECT_ID}`, etc.) — **no bash local variables** inside step scripts. This avoids `INVALID_ARGUMENT: key in the template "…" is not a valid built-in substitution` errors, since Cloud Build scans all `$IDENT` / `${IDENT}` patterns in the YAML and rejects anything that is not a built-in or `_`-prefixed user substitution.

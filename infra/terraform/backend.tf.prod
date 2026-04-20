@@ -1,0 +1,3 @@
+# Dùng với: terraform init -reconfigure -backend-config=backend.tf.prod
+bucket = "veho-mitene-common-terraform-state"
+prefix = "app/prod"

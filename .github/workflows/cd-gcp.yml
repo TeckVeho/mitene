@@ -1,0 +1,213 @@
+# GCP — Cloud Build (push + optional manual) via Workload Identity Federation
+#
+# Push tới develop | staging | production: tự động chọn build_mode theo thay đổi trong backend/** và frontend/**
+#   (cả hai → full; chỉ một phía → backend | frontend; không đụng backend/frontend → skip).
+# workflow_dispatch: chọn build_mode (full | backend | frontend), bỏ qua path filter.
+#
+# GitHub Environment = tên branch (github.ref_name). Tạo Environments: develop, staging, production.
+# Trong mỗi Environment:
+#   Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+#   Variables: GCP_NEXT_PUBLIC_API_URL, GCP_NEXT_PUBLIC_BASE_URL; optional GCP_IMAGE_TAG,
+#     GCP_AR_PROJECT_ID, GCP_DEPLOY_PROJECT_ID — see cloudbuild/README.md.
+#
+# Cloud Build: production → cloudbuild.prod*.yaml; develop và staging → cloudbuild.dev*.yaml.
+# Default _TAG nếu không set GCP_IMAGE_TAG: develop → dev, staging → stage, production → prod.
+
+name: CD GCP
+
+concurrency:
+  group: cd-gcp-${{ github.ref_name }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+      - production
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'full = API + web; backend = API image only; frontend = web image only'
+        type: choice
+        options:
+          - full
+          - backend
+          - frontend
+        default: full
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve-mode:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/production'
+    outputs:
+      build_mode: ${{ steps.resolve.outputs.build_mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'push'
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+      - id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "build_mode=${{ inputs.build_mode }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BE="${{ steps.filter.outputs.backend }}"
+          FE="${{ steps.filter.outputs.frontend }}"
+          if [ "${BE}" = "true" ] && [ "${FE}" = "true" ]; then
+            echo "build_mode=full" >> "$GITHUB_OUTPUT"
+          elif [ "${BE}" = "true" ]; then
+            echo "build_mode=backend" >> "$GITHUB_OUTPUT"
+          elif [ "${FE}" = "true" ]; then
+            echo "build_mode=frontend" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_mode=skip" >> "$GITHUB_OUTPUT"
+          fi
+
+  cloud-build:
+    needs: resolve-mode
+    if: needs.resolve-mode.outputs.build_mode != 'skip'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve Cloud Build config
+        id: cfg
+        env:
+          ENV_NAME: ${{ github.ref_name }}
+          MODE: ${{ needs.resolve-mode.outputs.build_mode }}
+        run: |
+          set -euo pipefail
+          echo "env_name=${ENV_NAME}" >> "$GITHUB_OUTPUT"
+          case "${ENV_NAME}" in
+            production)
+              case "${MODE}" in
+                backend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.prod.api.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                frontend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.prod.web.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                full|*)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.prod.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+              esac
+              DEFAULT_TAG=prod
+              ;;
+            staging)
+              case "${MODE}" in
+                backend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.api.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                frontend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.web.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                full|*)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+              esac
+              DEFAULT_TAG=stage
+              ;;
+            develop)
+              case "${MODE}" in
+                backend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.api.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                frontend)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.web.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+                full|*)
+                  echo "cloudbuild_config=cloudbuild/cloudbuild.dev.yaml" >> "$GITHUB_OUTPUT"
+                  ;;
+              esac
+              DEFAULT_TAG=dev
+              ;;
+            *)
+              echo "Internal error: unexpected ref_name=${ENV_NAME}" >&2
+              exit 1
+              ;;
+          esac
+          TAG="${{ vars.GCP_IMAGE_TAG }}"
+          if [ -z "${TAG}" ]; then TAG="${DEFAULT_TAG}"; fi
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate required GCP secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          set -euo pipefail
+          missing=
+          [ -z "${GCP_PROJECT_ID}" ] && missing="${missing} GCP_PROJECT_ID"
+          [ -z "${GCP_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_SERVICE_ACCOUNT"
+          [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] && missing="${missing} GCP_WORKLOAD_IDENTITY_PROVIDER"
+          if [ -n "${missing}" ]; then
+            echo "Missing Environment secrets for '${{ github.ref_name }}':${missing}"
+            exit 1
+          fi
+
+      - name: Validate required Variables for full / frontend
+        if: needs.resolve-mode.outputs.build_mode == 'full' || needs.resolve-mode.outputs.build_mode == 'frontend'
+        run: |
+          set -euo pipefail
+          if [ -z "${{ vars.GCP_NEXT_PUBLIC_API_URL }}" ] || [ -z "${{ vars.GCP_NEXT_PUBLIC_BASE_URL }}" ]; then
+            echo "build_mode '${{ needs.resolve-mode.outputs.build_mode }}' requires GCP_NEXT_PUBLIC_API_URL and GCP_NEXT_PUBLIC_BASE_URL in this Environment (Variables)."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify Cloud Build access to target project
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud builds list --project="${PROJECT_ID}" --limit=1
+
+      - name: gcloud builds submit
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          CONFIG: ${{ steps.cfg.outputs.cloudbuild_config }}
+          TAG: ${{ steps.cfg.outputs.image_tag }}
+          API_URL: ${{ vars.GCP_NEXT_PUBLIC_API_URL }}
+          BASE_URL: ${{ vars.GCP_NEXT_PUBLIC_BASE_URL }}
+          AR_PROJECT_ID: ${{ vars.GCP_AR_PROJECT_ID }}
+          DEPLOY_PROJECT_ID: ${{ vars.GCP_DEPLOY_PROJECT_ID }}
+          MODE: ${{ needs.resolve-mode.outputs.build_mode }}
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}"
+          AR_PID="${AR_PROJECT_ID:-${PROJECT_ID}}"
+          DEPLOY_PID="${DEPLOY_PROJECT_ID:-${PROJECT_ID}}"
+          COMMON_SUBS="_TAG=${TAG},_AR_PROJECT_ID=${AR_PID},_DEPLOY_PROJECT_ID=${DEPLOY_PID}"
+          if [ "${MODE}" = "backend" ]; then
+            gcloud builds submit --project="${PROJECT_ID}" --config="${CONFIG}" \
+              --substitutions="${COMMON_SUBS}" .
+          else
+            gcloud builds submit --project="${PROJECT_ID}" --config="${CONFIG}" \
+              --substitutions="${COMMON_SUBS},_NEXT_PUBLIC_API_URL=${API_URL},_NEXT_PUBLIC_BASE_URL=${BASE_URL}" .
+          fi

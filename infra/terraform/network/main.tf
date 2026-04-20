@@ -31,6 +31,7 @@ resource "google_compute_subnetwork" "connector" {
   network       = google_compute_network.vpc.id
 }
 
+
 resource "google_compute_global_address" "private_service_range" {
   name          = "mitene-psa-${var.env_suffix}"
   purpose       = "VPC_PEERING"
