@@ -64,6 +64,10 @@ async def remote_login_ws(
     """
     # Auth check
     if not await _verify_admin_ws(user_id):
+        logger.warning(
+            "Remote login WebSocket rejected (missing user_id, unknown user, or non-admin): user_id=%r",
+            user_id,
+        )
         await websocket.close(code=4003, reason="Admin access required")
         return
 
