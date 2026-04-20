@@ -22,6 +22,7 @@ env/
 .env.local
 .env.*.local
 backend/.env
+backend/.env.production.dev
 
 # PM2 config (tự config trên server, tham khảo file .example)
 **/ecosystem.config.js

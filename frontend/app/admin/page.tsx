@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Play,
   Monitor,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -138,6 +139,17 @@ export default function AdminPage() {
     ));
   };
 
+  const { mutate: triggerSyncFromGit, isPending: isSyncingFromGit } = useMutation({
+    mutationFn: () => api.triggerWikiSyncFromGit(),
+    onSuccess: (data) => {
+      setSyncMessage(data.message);
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ["wiki-directories"] });
+        void refetchSyncStatus();
+      }, 2500);
+    },
+  });
+
   const { mutate: triggerSyncFromDir, isPending: isSyncingFromDir } = useMutation({
     mutationFn: (payload: { path?: string; paths?: string[] }) => api.triggerWikiSyncFromDirectory(payload),
     onSuccess: (data) => {
@@ -231,6 +243,23 @@ export default function AdminPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => triggerSyncFromGit()}
+                disabled={isSyncingFromGit || syncStatus?.is_syncing || isSyncingFromDir}
+              >
+                {isSyncingFromGit ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                {t.admin.syncWikiFromGit}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               {t.admin.selectDirectory}
             </p>

@@ -13,9 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# ffmpeg/ffprobe (thumbnails, duration) + Playwright Chromium system deps
+# ffmpeg/ffprobe (thumbnails, duration) + Playwright Chromium system deps + git (wiki sync)
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ffmpeg \
+    git \
+    openssh-client \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \

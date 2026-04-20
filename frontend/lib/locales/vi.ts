@@ -105,6 +105,7 @@ export const vi: Translations = {
     noChanges: "Không có thay đổi - Đã là phiên bản mới nhất",
     syncStarted: "Đã bắt đầu đồng bộ",
     createFromDirectory: "Tạo video từ thư mục",
+    syncWikiFromGit: "Đồng bộ wiki từ Git",
     selectDirectory: "Chọn thư mục",
     selectParts: "Chọn file (có thể chọn nhiều)",
     allParts: "Chọn tất cả",

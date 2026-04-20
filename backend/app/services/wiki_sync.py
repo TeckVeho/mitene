@@ -10,15 +10,23 @@ Gitリポジトリ内の .md ファイルを監視し、変更があった場合
   WIKI_GIT_REPO_URL   - Git リポジトリ URL
   WIKI_GIT_LOCAL_PATH - ローカルクローン先パス（デフォルト: ./wiki-repo）
   WIKI_GIT_BRANCH     - ブランチ名（デフォルト: main）
+
+resolve_storage_kind()==gcs のとき、wiki .md は GCS_BUCKET 上の固定プレフィックス ``wiki-repo/`` 配下（例: gs://.../wiki-repo/security/guide.md）。
 """
 
 import asyncio
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
+
+import storage as storage_mod
+from resolve_storage import resolve_storage_kind
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +35,9 @@ WIKI_GIT_LOCAL_PATH: str = os.environ.get("WIKI_GIT_LOCAL_PATH", "./wiki-repo")
 WIKI_GIT_BRANCH: str = os.environ.get("WIKI_GIT_BRANCH", "main")
 WIKI_GIT_TOKEN: Optional[str] = os.environ.get("WIKI_GIT_TOKEN")
 WIKI_GIT_HTTP_USERNAME: str = os.environ.get("WIKI_GIT_HTTP_USERNAME", "x-access-token")
+
+# GCS wiki モード時のオブジェクトキー先頭（環境変数では変更しない）
+WIKI_GCS_OBJECT_PREFIX: str = "wiki-repo/"
 
 # カテゴリマッピング: ディレクトリ名 → カテゴリスラッグ・名前
 CATEGORY_MAP: dict[str, tuple[str, str]] = {
@@ -39,6 +50,74 @@ CATEGORY_MAP: dict[str, tuple[str, str]] = {
     "misc": ("misc", "その他"),
     "general": ("misc", "その他"),
 }
+
+
+def _wiki_uses_gcs() -> bool:
+    """GCS_BUCKET 設定済みで resolve_storage_kind が gcs のとき True（Cloud Run 等）。"""
+    return resolve_storage_kind() == "gcs"
+
+
+def _list_all_md_rel_paths_gcs() -> list[str]:
+    """GCS 上のプレフィックス配下の .md を相対パス一覧で返す。"""
+    prefix = WIKI_GCS_OBJECT_PREFIX
+    keys = storage_mod.gcs_list_object_keys_under_prefix(prefix)
+    rels: list[str] = []
+    for k in keys:
+        if not k.endswith(".md"):
+            continue
+        rel = k[len(prefix) :].replace("\\", "/")
+        if rel:
+            rels.append(rel)
+    return rels
+
+
+def _gcs_object_key_for_rel(rel_path: str) -> str:
+    rel = rel_path.strip().lstrip("/").replace("\\", "/")
+    return WIKI_GCS_OBJECT_PREFIX + rel
+
+
+def _build_wiki_directories_from_md_files(md_files: list[str]) -> list[dict]:
+    """get_wiki_directories と同形式のディレクトリ一覧を .md 相対パスから構築する。"""
+    if not md_files:
+        return []
+
+    dir_counts: dict[str, int] = {}
+    dir_files: dict[str, list[dict[str, str]]] = {}
+    for rel_path in md_files:
+        parts = Path(rel_path).parts
+        if len(parts) == 1:
+            dir_key = ""
+        else:
+            dir_key = parts[0]
+        dir_counts[dir_key] = dir_counts.get(dir_key, 0) + 1
+        dir_files.setdefault(dir_key, []).append(
+            {
+                "fileName": Path(rel_path).name,
+                "path": rel_path,
+            }
+        )
+
+    result = []
+    if "" in dir_counts:
+        result.append(
+            {
+                "path": "",
+                "label": "ルート",
+                "count": dir_counts[""],
+                "files": sorted(dir_files.get("", []), key=lambda f: f["path"]),
+            }
+        )
+    for d in sorted(dir_counts.keys()):
+        if d:
+            result.append(
+                {
+                    "path": d,
+                    "label": d,
+                    "count": dir_counts[d],
+                    "files": sorted(dir_files.get(d, []), key=lambda f: f["path"]),
+                }
+            )
+    return result
 
 
 def _run_git(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:
@@ -117,6 +196,14 @@ def _clone_or_pull(
     Returns: (成功フラグ, 新しいcommit hash or None)
     """
     path = Path(local_path)
+
+    if not shutil.which("git"):
+        if not quiet:
+            logger.warning("git コマンドが見つかりません。wiki 同期をスキップします。")
+        if not path.exists():
+            return False, None
+        old_hash = _get_commit_hash(str(path), quiet=quiet)
+        return True, old_hash
 
     auth_repo_url = _auth_url_for_git_operations(repo_url)
 
@@ -199,13 +286,21 @@ _sync_status: dict = {
     "last_hash": None,
     "total_articles": 0,
     "is_syncing": False,
+    "wiki_source_syncing": False,
     "error": None,
 }
 
+_sync_from_git_lock = threading.Lock()
+
 
 def get_sync_status() -> dict:
-    """現在の同期状態を返す"""
-    return dict(_sync_status)
+    """現在の同期状態を返す（is_syncing はディレクトリ同期と Git ソース同期のいずれかで True）。"""
+    out = dict(_sync_status)
+    out["is_syncing"] = bool(
+        _sync_status["is_syncing"] or _sync_status.get("wiki_source_syncing")
+    )
+    out.pop("wiki_source_syncing", None)
+    return out
 
 
 def _get_all_md_files(repo_path: str) -> list[str]:
@@ -255,56 +350,108 @@ def get_wiki_directories() -> list[dict]:
     """
     リポジトリ内の .md を含むディレクトリ一覧を返す。
     返却形式: [{"path": "", "label": "ルート", "count": 2}, {"path": "security", "label": "security", "count": 5}, ...]
+
+    Git モード: 一覧取得のたびに clone または pull（管理画面アクセス時に最新化。負荷は管理ユーザー少数を想定）。
+    GCS モード: プレフィックス配下を列挙（オブジェクトストレージがソース）。
     """
+    if _wiki_uses_gcs():
+        md_files = _list_all_md_rel_paths_gcs()
+        return _build_wiki_directories_from_md_files(md_files)
+
     local_path = os.path.abspath(WIKI_GIT_LOCAL_PATH)
-    
-    # 常に同期して最新情報をリストアップする
-    _clone_or_pull(WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH, quiet=False)
-    
+    # 一覧取得のたびに clone/pull（ログは quiet で抑制）
+    _clone_or_pull(WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH, quiet=True)
     if not Path(local_path).exists():
         return []
 
     md_files = _get_all_md_files(local_path)
-    if not md_files:
-        return []
+    return _build_wiki_directories_from_md_files(md_files)
 
-    dir_counts: dict[str, int] = {}
-    dir_files: dict[str, list[dict[str, str]]] = {}
-    for rel_path in md_files:
-        parts = Path(rel_path).parts
-        if len(parts) == 1:
-            dir_key = ""
-        else:
-            dir_key = parts[0]
-        dir_counts[dir_key] = dir_counts.get(dir_key, 0) + 1
-        dir_files.setdefault(dir_key, []).append(
-            {
-                "fileName": Path(rel_path).name,
-                "path": rel_path,
-            }
-        )
 
-    result = []
-    if "" in dir_counts:
-        result.append(
-            {
-                "path": "",
-                "label": "ルート",
-                "count": dir_counts[""],
-                "files": sorted(dir_files.get("", []), key=lambda f: f["path"]),
-            }
-        )
-    for d in sorted(dir_counts.keys()):
-        if d:
-            result.append(
-                {
-                    "path": d,
-                    "label": d,
-                    "count": dir_counts[d],
-                    "files": sorted(dir_files.get(d, []), key=lambda f: f["path"]),
+def sync_wiki_from_git_source() -> dict:
+    """
+    管理画面「Wiki を Git から同期」用。
+    - Git モード: WIKI_GIT_LOCAL_PATH で clone/pull。
+    - GCS モード: 一時ディレクトリに clone/pull し、追跡 .md を wiki-repo/ にアップロード。
+    """
+    repo_url = (WIKI_GIT_REPO_URL or "").strip()
+    if not repo_url:
+        msg = "WIKI_GIT_REPO_URL が設定されていません"
+        _sync_status["error"] = msg
+        return {"ok": False, "message": msg}
+
+    with _sync_from_git_lock:
+        if _sync_status["is_syncing"] or _sync_status.get("wiki_source_syncing"):
+            return {"ok": False, "message": "同期が既に実行中です"}
+        _sync_status["wiki_source_syncing"] = True
+        _sync_status["error"] = None
+
+    try:
+
+        if _wiki_uses_gcs():
+            with tempfile.TemporaryDirectory(prefix="wiki-git-") as tmp:
+                tmp_repo = os.path.join(tmp, "repo")
+                ok, commit_hash = _clone_or_pull(
+                    repo_url, tmp_repo, WIKI_GIT_BRANCH, quiet=True
+                )
+                if not ok or not Path(tmp_repo).exists():
+                    msg = "Git clone/pull に失敗しました"
+                    _sync_status["error"] = msg
+                    return {"ok": False, "message": msg}
+
+                md_files = _get_all_md_files(tmp_repo)
+                uploaded = 0
+                for rel in md_files:
+                    rel_posix = rel.replace("\\", "/")
+                    full = Path(tmp_repo) / rel_posix
+                    if not full.is_file():
+                        continue
+                    data = full.read_bytes()
+                    key = WIKI_GCS_OBJECT_PREFIX + rel_posix
+                    storage_mod.gcs_upload_bytes(
+                        key, data, content_type="text/markdown"
+                    )
+                    uploaded += 1
+                    logger.debug("GCS wiki upload: %s", key)
+
+                _sync_status["last_sync_at"] = _now()
+                _sync_status["last_hash"] = commit_hash
+                logger.info(
+                    "wiki Git→GCS 同期完了: %s 件 gs://%s/%s*",
+                    uploaded,
+                    getattr(storage_mod, "GCS_BUCKET", ""),
+                    WIKI_GCS_OBJECT_PREFIX,
+                )
+                return {
+                    "ok": True,
+                    "message": f"{uploaded} 件の .md を GCS に反映しました",
+                    "uploaded": uploaded,
+                    "hash": commit_hash,
                 }
-            )
-    return result
+
+        local_path = os.path.abspath(WIKI_GIT_LOCAL_PATH)
+        ok, commit_hash = _clone_or_pull(repo_url, local_path, WIKI_GIT_BRANCH, quiet=True)
+        if not ok and not Path(local_path).exists():
+            msg = "Wiki リポジトリの取得に失敗しました"
+            _sync_status["error"] = msg
+            return {"ok": False, "message": msg}
+
+        _sync_status["last_sync_at"] = _now()
+        _sync_status["last_hash"] = commit_hash
+        return {
+            "ok": True,
+            "message": "Git の wiki を取得しました",
+            "hash": commit_hash,
+        }
+
+    except Exception as exc:
+        err = str(exc)
+        _sync_status["error"] = err
+        logger.exception("sync_wiki_from_git_source 失敗")
+        return {"ok": False, "message": err}
+    finally:
+        with _sync_from_git_lock:
+            _sync_status["wiki_source_syncing"] = False
 
 
 async def sync_wiki_from_directory(
@@ -322,7 +469,7 @@ async def sync_wiki_from_directory(
     """
     import database as db
 
-    if _sync_status["is_syncing"]:
+    if _sync_status["is_syncing"] or _sync_status.get("wiki_source_syncing"):
         return {"status": "already_running", "message": "同期が既に実行中です"}
 
     _sync_status["is_syncing"] = True
@@ -334,21 +481,29 @@ async def sync_wiki_from_directory(
         normalized_target_paths = [
             _normalize_sync_path(p) for p in (target_paths or []) if _normalize_sync_path(p).endswith(".md")
         ]
-        success, new_hash = _clone_or_pull(
-            WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH, quiet=True
-        )
+        if _wiki_uses_gcs():
+            # GCS モードでは Git commit SHA の代わりに固定値を保存する
+            new_hash = "gcs"
+            all_md = _list_all_md_rel_paths_gcs()
+            if not all_md:
+                _sync_status["is_syncing"] = False
+                return {"status": "skipped", "message": "GCS に .md がありません"}
+        else:
+            success, new_hash = _clone_or_pull(
+                WIKI_GIT_REPO_URL or "", local_path, WIKI_GIT_BRANCH, quiet=True
+            )
 
-        if not success and not Path(local_path).exists():
-            msg = f"Wiki リポジトリが見つかりません: {local_path}"
-            _sync_status["error"] = msg
-            _sync_status["is_syncing"] = False
-            return {"status": "error", "message": msg}
+            if not success and not Path(local_path).exists():
+                msg = f"Wiki リポジトリが見つかりません: {local_path}"
+                _sync_status["error"] = msg
+                _sync_status["is_syncing"] = False
+                return {"status": "error", "message": msg}
 
-        if not Path(local_path).exists():
-            _sync_status["is_syncing"] = False
-            return {"status": "skipped", "message": "リポジトリが存在しません"}
+            if not Path(local_path).exists():
+                _sync_status["is_syncing"] = False
+                return {"status": "skipped", "message": "リポジトリが存在しません"}
 
-        all_md = _get_all_md_files(local_path)
+            all_md = _get_all_md_files(local_path)
         if normalized_target_paths:
             all_md_set = set(all_md)
             deduped_paths = list(dict.fromkeys(normalized_target_paths))
@@ -372,12 +527,22 @@ async def sync_wiki_from_directory(
         jobs_created = 0
 
         for rel_path in target_files:
-            full_path = Path(local_path) / rel_path
-            if not full_path.exists():
-                continue
+            if _wiki_uses_gcs():
+                try:
+                    raw = storage_mod.gcs_download_bytes(_gcs_object_key_for_rel(rel_path))
+                except Exception:
+                    continue
+            else:
+                full_path = Path(local_path) / rel_path
+                if not full_path.exists():
+                    continue
+                try:
+                    raw = full_path.read_bytes()
+                except Exception:
+                    continue
 
             try:
-                content = full_path.read_text(encoding="utf-8", errors="replace")
+                content = raw.decode("utf-8", errors="replace")
                 title = _extract_title(content, rel_path)
                 cat_slug, cat_name = _infer_category(rel_path)
 
@@ -415,7 +580,7 @@ async def sync_wiki_from_directory(
                         now = datetime.now(timezone.utc).isoformat()
 
                         local_md_path = uploads_dir / f"{job_id}_{md_filename}"
-                        local_md_path.write_bytes(full_path.read_bytes())
+                        local_md_path.write_bytes(raw)
                         output_path = outputs_dir / f"{job_id}.mp4"
 
                         initial_steps = [
