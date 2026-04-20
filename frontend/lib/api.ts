@@ -11,6 +11,7 @@ import type {
   WatchRecord,
   WikiSyncResult,
   WikiSyncStatus,
+  WikiGitSyncStart,
   WikiDirectory,
   ArticleRecord,
   AdminVideoPatch,
@@ -289,6 +290,15 @@ async function realTriggerWikiSyncFromDirectory(payload: { path?: string; paths?
   return res.json();
 }
 
+async function realTriggerWikiSyncFromGit(): Promise<WikiGitSyncStart> {
+  const res = await fetch(
+    `${BASE_URL}/wiki/sync-from-git`,
+    withUserAuth({ method: "POST" }),
+  );
+  if (!res.ok) throw new Error("Wiki の Git 同期の開始に失敗しました");
+  return res.json();
+}
+
 
 async function realGetComments(videoId: string): Promise<Comment[]> {
   const res = await fetch(`${BASE_URL}/videos/${videoId}/comments`, {
@@ -338,6 +348,7 @@ export const api = {
   getWikiSyncStatus: realGetWikiSyncStatus,
   getWikiDirectories: realGetWikiDirectories,
   triggerWikiSyncFromDirectory: realTriggerWikiSyncFromDirectory,
+  triggerWikiSyncFromGit: realTriggerWikiSyncFromGit,
   getAdminArticles: realGetAdminArticles,
   getAdminVideos: realGetAdminVideos,
   patchAdminVideo: realPatchAdminVideo,

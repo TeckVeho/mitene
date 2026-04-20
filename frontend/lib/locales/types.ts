@@ -124,6 +124,7 @@ export interface Translations {
     noChanges: string;
     syncStarted: string;
     createFromDirectory: string;
+    syncWikiFromGit: string;
     selectDirectory: string;
     selectParts: string;
     allParts: string;

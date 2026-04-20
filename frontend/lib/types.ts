@@ -96,6 +96,12 @@ export interface WikiSyncResult {
   hash?: string;
 }
 
+/** POST /wiki/sync-from-git — バックグラウンド開始の応答 */
+export interface WikiGitSyncStart {
+  message: string;
+  sync_id: string;
+}
+
 export interface WikiDirectory {
   path: string;
   label: string;

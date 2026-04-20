@@ -105,6 +105,7 @@ export const ja: Translations = {
     noChanges: "変更なし - すでに最新です",
     syncStarted: "同期を開始しました",
     createFromDirectory: "ディレクトリから動画作成",
+    syncWikiFromGit: "WikiをGitから同期",
     selectDirectory: "ディレクトリを選択",
     selectParts: "ファイルを選択（複数可）",
     allParts: "すべて選択",

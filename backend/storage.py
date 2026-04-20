@@ -10,6 +10,7 @@ resolve_storage_kind に従い GCS / S3 / ローカルを使用する。
   uploads/{job_id}/{filename}  - アップロードされたファイル
   outputs/{job_id}.mp4         - 生成済み MP4 ファイル
   outputs/{job_id}.jpg         - サムネイル
+  （GCS かつ wiki モード）固定プレフィックス wiki-repo/ 配下の .md — gcs_list_object_keys_under_prefix / gcs_download_bytes / gcs_upload_bytes
 """
 
 from __future__ import annotations
@@ -78,6 +79,29 @@ def _gcs_bucket():
     if not GCS_BUCKET:
         raise RuntimeError("GCS_BUCKET is not set")
     return _get_gcs_client().bucket(GCS_BUCKET)
+
+
+def gcs_list_object_keys_under_prefix(prefix: str) -> list[str]:
+    """
+    GCS_BUCKET 内で prefix で始まるオブジェクトキーを列挙する（再帰的）。
+    resolve_storage_kind() が gcs のとき、かつ GCS_BUCKET が設定されているときに使用する。
+    """
+    if not prefix:
+        raise ValueError("prefix must be non-empty")
+    bucket = _gcs_bucket()
+    return sorted({blob.name for blob in bucket.list_blobs(prefix=prefix)})
+
+
+def gcs_download_bytes(object_key: str) -> bytes:
+    """GCS_BUCKET の object_key をバイト列で取得する。"""
+    blob = _gcs_bucket().blob(object_key)
+    return blob.download_as_bytes()
+
+
+def gcs_upload_bytes(object_key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+    """GCS_BUCKET に object_key でバイト列を書き込む（wiki .md 同期など）。"""
+    blob = _gcs_bucket().blob(object_key)
+    blob.upload_from_string(data, content_type=content_type)
 
 
 def _gcs_signed_url(key: str, expires_in: int) -> str:

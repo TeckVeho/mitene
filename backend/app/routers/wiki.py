@@ -13,7 +13,12 @@ from app.dependencies import require_admin_user
 from app.job_runtime import job_semaphore
 from app.schemas.wiki import WikiSyncDirectoryRequest
 from app.services.runner import run_job
-from app.services.wiki_sync import get_sync_status, get_wiki_directories, sync_wiki_from_directory
+from app.services.wiki_sync import (
+    get_sync_status,
+    get_wiki_directories,
+    sync_wiki_from_directory,
+    sync_wiki_from_git_source,
+)
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
@@ -22,6 +27,24 @@ router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 async def wiki_get_directories(_admin: Annotated[dict, Depends(require_admin_user)]):
     """リポジトリ内の .md を含むディレクトリ一覧を返す"""
     return get_wiki_directories()
+
+
+@router.post("/sync-from-git")
+async def wiki_sync_from_git(
+    background_tasks: BackgroundTasks,
+    _admin: Annotated[dict, Depends(require_admin_user)],
+):
+    """Git から wiki を取得（ローカル clone/pull または GCS へ .md アップロード）。バックグラウンド実行。"""
+    sync_id = f"wsrc_{uuid.uuid4().hex[:8]}"
+
+    def _run() -> None:
+        sync_wiki_from_git_source()
+
+    background_tasks.add_task(_run)
+    return {
+        "message": "Wiki を Git から同期を開始しました",
+        "sync_id": sync_id,
+    }
 
 
 @router.post("/sync-directory")
