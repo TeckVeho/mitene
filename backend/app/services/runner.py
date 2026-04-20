@@ -19,6 +19,7 @@ from typing import Callable, Awaitable, Optional
 from urllib.parse import urljoin
 
 import storage as storage_mod
+from app.config import STORAGE_STATE
 from webhook import send_webhook
 
 logger = logging.getLogger(__name__)
@@ -295,7 +296,7 @@ async def run_job(
     thumbnail_generated = False
 
     try:
-        async with await NotebookLMClient.from_storage() as client:
+        async with await NotebookLMClient.from_storage(str(STORAGE_STATE)) as client:
 
             # ── Step 1: ノートブック作成 ──────────────────────────────
             logger.info("run_job step start job_id=%s step=create_notebook", job_id)
@@ -481,7 +482,7 @@ async def run_job(
                     thumb_exc,
                 )
 
-            if storage_mod.is_s3_enabled():
+            if storage_mod.is_remote_object_storage_enabled():
                 if thumbnail_path is not None:
                     try:
                         await asyncio.get_event_loop().run_in_executor(

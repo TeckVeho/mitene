@@ -1,0 +1,10 @@
+# backend.tf trong repo dùng partial backend `backend "gcs" {}`.
+# Tạo backend.tf.dev / backend.tf.prod (hoặc copy từ backend.tf.example.*) rồi:
+#   terraform init -reconfigure -backend-config=backend.tf.dev
+#   terraform init -reconfigure -backend-config=backend.tf.prod
+#
+# Một prefix mỗi môi trường; cùng bucket với stack app/common.
+# Ví dụ nội dung file backend config (HCL):
+#   bucket = "my-project-common-terraform-state"
+#   prefix = "network/dev"
+

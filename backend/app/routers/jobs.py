@@ -47,7 +47,7 @@ async def download_job(job_id: str, _admin: Annotated[dict, Depends(require_admi
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="ファイルはまだ準備ができていません")
 
-    if storage.is_s3_enabled():
+    if storage.is_remote_object_storage_enabled():
         url = storage.generate_mp4_download_url(job_id)
         if url is None:
             raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")

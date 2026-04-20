@@ -1,0 +1,154 @@
+# =============================================================================
+# Copy to terraform.tfvars or terraform.tfvars.dev (local files are gitignored).
+# Do not commit secrets — use Secret Manager + api_secret_env_from_sm / web_secret_env_from_sm.
+# =============================================================================
+#
+# Naming (internal wiki — adjust to match your org template):
+#   Cloud Run service : {service}-{component} e.g. mitene-api (defaults below use mitene-api-{env_suffix})
+#   Cloud SQL instance: mitene-mysql-{env_suffix} unless sql_instance_name overrides (legacy instances)
+#   Artifact Registry : mitene-docker (artifact_repo_id)
+#   GCS uploads bucket : {project_id}-mitene-uploads-{env_suffix} unless gcs_bucket_name set
+#   VPC (network stack): default mitene-vpc-{env_suffix} or set network_name → e.g. {project_id}-vpc style
+#
+# =============================================================================
+
+# --- Required ---
+
+project_id = "your-gcp-project-id"
+env_suffix = "dev"
+
+# Image must exist in Artifact Registry before deploy (build via Cloud Build).
+container_image = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/mitene-docker/mitene-api:dev"
+
+# --- Artifact Registry: single-project vs multi-project (4-project layout) ---
+#
+# A) Single project: registry lives in project_id (default create_artifact_registry = true).
+# create_artifact_registry = true
+#
+# B) Multi-project: registry in COMMON project; app project only pulls images.
+#    Apply infra/terraform/common/ with reader_project_ids including this project_id.
+# create_artifact_registry = false
+# container_image = "asia-northeast1-docker.pkg.dev/your-project-common/mitene-docker/mitene-api:dev"
+
+# --- Cloud Run: port & service names ---
+#
+# container_port must match the process inside the image (backend Dockerfile EXPOSE 8080).
+container_port = 8080
+
+# Wiki uses mitene-api / mitene-web; defaults here add env: mitene-api-dev, mitene-web-dev (one project, many envs).
+# cloud_run_service_name     = "mitene-api-dev"
+# web_cloud_run_service_name = "mitene-web-dev"
+
+# --- Plain env (no secrets; secrets → Secret Manager + *_secret_env_from_sm) ---
+
+env_vars = {
+  PYTHONUNBUFFERED = "1"
+  LOG_LEVEL        = "info"
+  TIMEZONE         = "Asia/Tokyo"
+  STORAGE_BACKEND  = "gcs"
+  CORS_ORIGINS     = "https://REPLACE-WITH-WEB-CLOUD-RUN-URL"
+  FRONTEND_URL     = "https://REPLACE-WITH-WEB-CLOUD-RUN-URL"
+  APP_URL           = "https://REPLACE-WITH-API-CLOUD-RUN-URL"
+  API_URL           = "https://REPLACE-WITH-API-CLOUD-RUN-URL"
+}
+
+web_env_vars = {
+  NODE_ENV             = "production"
+  NEXT_PUBLIC_API_URL  = "https://REPLACE-WITH-API-CLOUD-RUN-URL/api"
+  NEXT_PUBLIC_BASE_URL = "https://REPLACE-WITH-WEB-CLOUD-RUN-URL"
+}
+
+# --- Custom domains (DNS at your registrar; not Google Domains required) ---
+# Leave both empty to use only the default *.run.app URLs.
+# After terraform apply, run: terraform output api_domain_mapping_status (and web_*) and add TXT + CNAME/ALIAS at your DNS provider as shown (apex may need ALIAS/CNAME flattening).
+# When api_custom_domain and/or web_custom_domain is set, Terraform merges API_URL (origin only), CORS, FRONTEND_URL, NEXT_PUBLIC_* (NEXT_PUBLIC_API_URL keeps /api) from those hostnames.
+# If only one service uses a custom domain, keep the other service URLs pointing at *.run.app in env_vars / web_env_vars as needed.
+#
+# api_custom_domain = ""
+# web_custom_domain = ""
+
+# --- GCS uploads (enable_gcs default: true) ---
+# Bucket default: {project_id}-mitene-uploads-{env_suffix}. Override for wiki-style {project_id}-{purpose}:
+# gcs_bucket_name = "your-gcp-project-id-assets"
+# gcs_force_destroy = false
+
+# --- Cloud SQL (MySQL) + network remote state ---
+#
+# enable_cloud_sql = true
+#
+# Instance name default: mitene-mysql-{env_suffix}. Override to keep an existing instance id:
+# sql_instance_name = "legacy-instance-id-from-console"
+# sql_tier                 = "db-f1-micro"
+# sql_disk_size_gb         = 10
+# sql_database_name        = "mitene"
+# sql_user_name            = "mitene"
+# sql_deletion_protection  = false
+#
+# Automated backups (default off). Set sql_backup_enabled = true for stg/prod as needed.
+# sql_backup_enabled                  = false
+# sql_backup_start_time               = "17:00"   # UTC HH:MM when backups enabled
+# sql_point_in_time_recovery_enabled  = false    # PITR; extra cost — often true in prod only
+#
+# Private IP requires network stack applied first:
+# network_remote_state_bucket  = "your-terraform-state-bucket"
+# network_remote_state_prefix  = "network/dev"
+#   Use network/stg, network/prod for other envs.
+
+# --- Next.js on Cloud Run ---
+# enable_web             = true
+# web_container_image    = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/mitene-docker/mitene-web:dev"
+# web_container_port     = 3000
+
+# --- Public HTTPS (.run.app) — org policy may block allUsers ---
+# allow_unauthenticated     = true
+# allow_unauthenticated_web = true
+
+# --- Region & Cloud Run scaling / resources (optional) ---
+# Tier4 On-Demand (wiki): dev/stg only — max 2, timeout 120s; do not use Tier4 for prod.
+# See infra/wiki.md «Thông số Tier4».
+# region = "asia-northeast1"
+# cloud_run_api_min_instances  = 0
+# cloud_run_api_max_instances  = 2
+# cloud_run_api_cpu            = "1"
+# cloud_run_api_memory         = "256Mi"   # main.tf sets cpu_idle=true so memory can be <512Mi (required if CPU always allocated)
+# cloud_run_api_timeout        = "120s"
+# cloud_run_api_concurrency    = 80
+# cloud_run_web_min_instances  = 0
+# cloud_run_web_max_instances  = 2
+# cloud_run_web_cpu            = "1"
+# cloud_run_web_memory         = "256Mi"   # same as API: cpu_idle=true in main.tf
+# cloud_run_web_timeout        = "120s"
+# cloud_run_web_concurrency    = 80
+
+# --- Secret Manager references (create secrets in GCP first) ---
+# api_secret_env_from_sm = [
+#   { env_name = "JWT_SECRET", secret_id = "mitene-jwt-secret-dev", version = "latest" },
+# ]
+# web_secret_env_from_sm = []
+
+# resource_tier = "tier4"   # dev/stg only per wiki; use tier3+ for prod
+
+# --- GCP project label `tier` (wiki) ---
+# manage_gcp_project_labels = false
+# If true: terraform import 'google_project.wiki_labels[0]' YOUR_PROJECT_ID  (once)
+# When true, set label_tier and/or resource_tier (non-empty).
+# label_tier = ""   # empty → resource_tier for label key `tier`
+# project_display_name = ""
+
+# --- Project IAM (e.g. Google Groups — optional) ---
+# Each list item = one project IAM binding (member + role). Add more objects for more groups/users/SAs,
+# or repeat the same member with another role to grant multiple roles to one principal.
+# Member prefixes: group:, user:, serviceAccount: — see GCP IAM principal identifiers.
+# project_iam_members = [
+#   { member = "group:gcp-dev-developers@your-domain.com", role = "roles/editor" },
+#   { member = "group:gcp-dev-readonly@your-domain.com", role = "roles/viewer" },
+#   { member = "group:gcp-dev-developers@your-domain.com", role = "roles/cloudsql.client" },
+#   { member = "user:alice@your-domain.com", role = "roles/storage.objectViewer" },
+#   # roles/owner — avoid unless strictly needed (broad admin access)
+# ]
+
+# --- Dev/stg only: Cloud SQL stop/start schedule (JST; requires enable_cloud_sql) ---
+# enable_sql_night_weekend_schedule = true
+# sql_schedule_timezone   = "Asia/Tokyo"
+# sql_schedule_start_cron = "0 8 * * 1-5"
+# sql_schedule_stop_cron  = "0 22 * * 1-5"

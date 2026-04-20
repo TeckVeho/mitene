@@ -36,5 +36,43 @@ GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-STORAGE_STATE = Path.home() / ".notebooklm" / "storage_state.json"
+# GCS (Terraform sets GCS_BUCKET on Cloud Run when enable_gcs)
+GCS_BUCKET: str | None = os.environ.get("GCS_BUCKET", "").strip() or None
+
+
+def _is_managed_google_cloud_runtime() -> bool:
+    """Cloud Run (K_SERVICE) or App Engine (GAE_SERVICE)."""
+    return bool(os.environ.get("K_SERVICE") or os.environ.get("GAE_SERVICE"))
+
+
+def _notebooklm_force_gcs_sync() -> bool:
+    return os.environ.get("NOTEBOOKLM_FORCE_GCS_SYNC", "").lower() in ("1", "true", "yes")
+
+
+def _notebooklm_disable_gcs_sync() -> bool:
+    return os.environ.get("NOTEBOOKLM_DISABLE_GCS_SYNC", "").lower() in ("1", "true", "yes")
+
+
+# Object key inside GCS_BUCKET (default prefix for NotebookLM session file)
+NOTEBOOKLM_GCS_OBJECT_KEY = (
+    os.environ.get("NOTEBOOKLM_GCS_OBJECT_KEY", "notebooklm/storage_state.json").strip()
+    or "notebooklm/storage_state.json"
+)
+
+# Sync storage_state.json to/from GCS when running on GCP with app bucket configured
+NOTEBOOKLM_GCS_SYNC_ENABLED = (
+    bool(GCS_BUCKET)
+    and not _notebooklm_disable_gcs_sync()
+    and (_is_managed_google_cloud_runtime() or _notebooklm_force_gcs_sync())
+)
+
+# NotebookLM Playwright session file.
+# On GCP + GCS_BUCKET: default to /tmp (writable) and sync from GCS on startup / after login.
+_NOTEBOOKLM_STORAGE_STATE_RAW = os.environ.get("NOTEBOOKLM_STORAGE_STATE", "").strip()
+if _NOTEBOOKLM_STORAGE_STATE_RAW:
+    STORAGE_STATE = Path(_NOTEBOOKLM_STORAGE_STATE_RAW).expanduser()
+elif NOTEBOOKLM_GCS_SYNC_ENABLED:
+    STORAGE_STATE = Path("/tmp/.notebooklm/storage_state.json")
+else:
+    STORAGE_STATE = Path.home() / ".notebooklm" / "storage_state.json"
 AUTH_COOKIE_NAMES = frozenset({"SID", "__Secure-1PSID", "__Secure-3PSID", "SAPISID"})

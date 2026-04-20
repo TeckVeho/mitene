@@ -80,7 +80,7 @@ async def stream_video(video_id: str):
 
     job_id = video.get("job_id")
 
-    if storage.is_s3_enabled() and job_id:
+    if storage.is_remote_object_storage_enabled() and job_id:
         url = storage.generate_mp4_streaming_url(job_id, expires_in=86400)
         if url:
             return RedirectResponse(url=url, status_code=302)
@@ -108,7 +108,7 @@ async def stream_thumbnail(video_id: str):
 
     job_id = video.get("job_id")
 
-    if storage.is_s3_enabled() and job_id:
+    if storage.is_remote_object_storage_enabled() and job_id:
         url = storage.generate_thumbnail_streaming_url(job_id, expires_in=86400)
         if url:
             return RedirectResponse(url=url, status_code=302)

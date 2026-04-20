@@ -1,0 +1,91 @@
+# Cloud Build — production images (API + web) → Artifact Registry
+#
+# Registry vs deploy: push to _AR_PROJECT_ID (common); deploy Cloud Run to _DEPLOY_PROJECT_ID (prod app).
+# GitHub Actions resolves empty fallback to $PROJECT_ID before calling gcloud builds submit.
+#
+# Submit from repo root:
+#   gcloud builds submit --config=cloudbuild/cloudbuild.prod.yaml \
+#     --substitutions=_AR_PROJECT_ID=your-common-project,_DEPLOY_PROJECT_ID=your-prod-project,...
+# Always override _NEXT_PUBLIC_* for your production API/web hosts.
+# Backend-only: cloudbuild/cloudbuild.prod.api.yaml
+# Web image only: cloudbuild/cloudbuild.prod.web.yaml
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        docker pull ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-api:${_TAG} || true
+        docker build \
+          --cache-from ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-api:${_TAG} \
+          -t ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-api:${_TAG} \
+          .
+    dir: 'backend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-api:${_TAG}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        docker pull ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG} || true
+        docker build \
+          --build-arg NEXT_PUBLIC_API_URL=${_NEXT_PUBLIC_API_URL} \
+          --build-arg NEXT_PUBLIC_BASE_URL=${_NEXT_PUBLIC_BASE_URL} \
+          --cache-from ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG} \
+          -t ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG} \
+          .
+    dir: 'frontend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG}'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mitene-api-prod'
+      - '--project'
+      - '${_DEPLOY_PROJECT_ID}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-api:${_TAG}'
+      - '--region'
+      - '${_REGION}'
+      - '--no-allow-unauthenticated'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mitene-web-prod'
+      - '--project'
+      - '${_DEPLOY_PROJECT_ID}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG}'
+      - '--region'
+      - '${_REGION}'
+      - '--no-allow-unauthenticated'
+
+substitutions:
+  _REGION: asia-northeast1
+  _REPO: mitene-docker
+  _TAG: prod
+  _AR_PROJECT_ID: ''
+  _DEPLOY_PROJECT_ID: ''
+  _NEXT_PUBLIC_API_URL: 'https://api.example.com/api'
+  _NEXT_PUBLIC_BASE_URL: 'https://app.example.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_MEDIUM

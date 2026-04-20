@@ -277,7 +277,7 @@ async def download_job_v1(
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail="動画はまだ準備ができていません")
 
-    if storage_mod.is_s3_enabled():
+    if storage_mod.is_remote_object_storage_enabled():
         url = storage_mod.generate_mp4_download_url(job_id)
         if url is None:
             raise HTTPException(status_code=500, detail="ダウンロード URL の生成に失敗しました")

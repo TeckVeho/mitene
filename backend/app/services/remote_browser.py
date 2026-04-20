@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import STORAGE_STATE
+from app.services.notebooklm_gcs import upload_storage_state_if_configured
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class RemoteBrowserSession:
 
             self._playwright = await async_playwright().start()
 
-            browser_profile = Path.home() / ".notebooklm" / "browser_profile"
+            browser_profile = STORAGE_STATE.parent / "browser_profile"
             browser_profile.mkdir(parents=True, exist_ok=True, mode=0o700)
 
             self._context = await self._playwright.chromium.launch_persistent_context(
@@ -151,6 +152,7 @@ class RemoteBrowserSession:
                 storage_path.chmod(0o600)
 
                 logger.info("Auth saved to %s", storage_path)
+                upload_storage_state_if_configured()
                 return str(storage_path)
             finally:
                 await self._cleanup()

@@ -1,0 +1,7 @@
+# Rename to backend.tf after the state bucket exists (see ../bootstrap/).
+terraform {
+  backend "gcs" {
+    bucket = "my-project-common-terraform-state"
+    prefix = "common/main"
+  }
+}

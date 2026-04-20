@@ -1,31 +1,46 @@
 """
 ファイルストレージ抽象化モジュール
 
-S3_BUCKET_NAME 環境変数が設定されている場合は AWS S3 を使用し、
-未設定の場合はローカルファイルシステムにフォールバックする（開発環境向け）。
+resolve_storage_kind に従い GCS / S3 / ローカルを使用する。
+- GCS: GCS_BUCKET（Terraform が Cloud Run に注入する場合あり）
+- S3: S3_BUCKET_NAME + AWS_REGION
+- いずれも無い場合はローカルファイルシステム（開発用）
 
-S3 フォルダ構成:
+オブジェクトキー構成（GCS / S3 共通）:
   uploads/{job_id}/{filename}  - アップロードされたファイル
   outputs/{job_id}.mp4         - 生成済み MP4 ファイル
+  outputs/{job_id}.jpg         - サムネイル
 """
+
+from __future__ import annotations
 
 import logging
 import os
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
+
+from resolve_storage import resolve_storage_kind
 
 logger = logging.getLogger(__name__)
 
 S3_BUCKET: Optional[str] = os.environ.get("S3_BUCKET_NAME")
 AWS_REGION: str = os.environ.get("AWS_REGION", "ap-northeast-1")
+GCS_BUCKET: Optional[str] = os.environ.get("GCS_BUCKET", "").strip() or None
 
 _s3_client = None
+_gcs_client = None
+
+
+def is_remote_object_storage_enabled() -> bool:
+    """GCS または S3 でオブジェクトストレージを使う場合 True。"""
+    return resolve_storage_kind() in ("gcs", "s3")
 
 
 def is_s3_enabled() -> bool:
-    """S3 が有効かどうかを返す"""
-    return bool(S3_BUCKET)
+    """後方互換名: リモートオブジェクトストレージ（GCS 含む）が有効か。"""
+    return is_remote_object_storage_enabled()
 
 
 def _get_s3_client():
@@ -34,6 +49,7 @@ def _get_s3_client():
     if _s3_client is None:
         try:
             import boto3
+
             _s3_client = boto3.client("s3", region_name=AWS_REGION)
         except ImportError:
             raise RuntimeError(
@@ -41,6 +57,36 @@ def _get_s3_client():
                 "pip install 'boto3>=1.35.0' を実行してください。"
             )
     return _s3_client
+
+
+def _get_gcs_client():
+    global _gcs_client
+    if _gcs_client is None:
+        try:
+            from google.cloud import storage
+        except ImportError:
+            raise RuntimeError(
+                "google-cloud-storage がインストールされていません。"
+                "pip install 'google-cloud-storage>=2.14.0' を実行してください。"
+            )
+        project = os.environ.get("GCP_PROJECT_ID", "").strip() or None
+        _gcs_client = storage.Client(project=project)
+    return _gcs_client
+
+
+def _gcs_bucket():
+    if not GCS_BUCKET:
+        raise RuntimeError("GCS_BUCKET is not set")
+    return _get_gcs_client().bucket(GCS_BUCKET)
+
+
+def _gcs_signed_url(key: str, expires_in: int) -> str:
+    blob = _gcs_bucket().blob(key)
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(seconds=expires_in),
+        method="GET",
+    )
 
 
 def save_file_locally(uploads_dir: Path, job_id: str, filename: str, content: bytes) -> Path:
@@ -60,13 +106,24 @@ def save_csv_locally(uploads_dir: Path, job_id: str, filename: str, content: byt
 
 def upload_csv_to_s3(job_id: str, filename: str, content: bytes) -> Optional[str]:
     """
-    ファイルを S3 にアップロードする。
-    S3 が無効な場合は None を返す。
+    ファイルを GCS または S3 にアップロードする。
+    ローカルモードの場合は None を返す。
     """
-    if not is_s3_enabled():
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"uploads/{job_id}/{filename}"
+    if kind == "gcs":
+        try:
+            blob = _gcs_bucket().blob(key)
+            blob.upload_from_string(content, content_type="text/plain")
+            logger.info("ファイルを GCS にアップロード: gs://%s/%s", GCS_BUCKET, key)
+            return key
+        except Exception as exc:
+            logger.warning("GCS アップロード失敗（ローカル保存は継続）: %s", exc)
+            return None
+
     try:
         _get_s3_client().put_object(
             Bucket=S3_BUCKET,
@@ -83,23 +140,28 @@ def upload_csv_to_s3(job_id: str, filename: str, content: bytes) -> Optional[str
 
 def upload_mp4_to_s3(job_id: str, local_path: Path) -> Optional[str]:
     """
-    生成済み MP4 ファイルをローカルから S3 にアップロードする。
+    生成済み MP4 を GCS または S3 にアップロードする。
     アップロード後、ローカルの一時ファイルは削除する。
-    S3 が無効な場合は None を返す。
     """
-    if not is_s3_enabled():
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"outputs/{job_id}.mp4"
     try:
-        with open(local_path, "rb") as f:
-            _get_s3_client().upload_fileobj(
-                f,
-                S3_BUCKET,
-                key,
-                ExtraArgs={"ContentType": "video/mp4"},
-            )
-        logger.info("MP4 を S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
+        if kind == "gcs":
+            blob = _gcs_bucket().blob(key)
+            blob.upload_from_filename(str(local_path), content_type="video/mp4")
+            logger.info("MP4 を GCS にアップロード: gs://%s/%s", GCS_BUCKET, key)
+        else:
+            with open(local_path, "rb") as f:
+                _get_s3_client().upload_fileobj(
+                    f,
+                    S3_BUCKET,
+                    key,
+                    ExtraArgs={"ContentType": "video/mp4"},
+                )
+            logger.info("MP4 を S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
 
         try:
             local_path.unlink(missing_ok=True)
@@ -109,7 +171,7 @@ def upload_mp4_to_s3(job_id: str, local_path: Path) -> Optional[str]:
 
         return key
     except Exception as exc:
-        logger.error("MP4 S3 アップロード失敗: %s", exc)
+        logger.error("MP4 アップロード失敗: %s", exc)
         raise
 
 
@@ -193,23 +255,28 @@ def extract_thumbnail_locally(job_id: str, mp4_path: Path) -> Path:
 
 def upload_thumbnail_to_s3(job_id: str, local_jpg: Path) -> Optional[str]:
     """
-    サムネイル JPEG をローカルから S3 にアップロードする。
+    サムネイル JPEG を GCS または S3 にアップロードする。
     アップロード後、ローカルファイルは削除する。
-    S3 が無効な場合は None を返す。
     """
-    if not is_s3_enabled():
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"outputs/{job_id}.jpg"
     try:
-        with open(local_jpg, "rb") as f:
-            _get_s3_client().upload_fileobj(
-                f,
-                S3_BUCKET,
-                key,
-                ExtraArgs={"ContentType": "image/jpeg"},
-            )
-        logger.info("サムネイルを S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
+        if kind == "gcs":
+            blob = _gcs_bucket().blob(key)
+            blob.upload_from_filename(str(local_jpg), content_type="image/jpeg")
+            logger.info("サムネイルを GCS にアップロード: gs://%s/%s", GCS_BUCKET, key)
+        else:
+            with open(local_jpg, "rb") as f:
+                _get_s3_client().upload_fileobj(
+                    f,
+                    S3_BUCKET,
+                    key,
+                    ExtraArgs={"ContentType": "image/jpeg"},
+                )
+            logger.info("サムネイルを S3 にアップロード: s3://%s/%s", S3_BUCKET, key)
 
         try:
             local_jpg.unlink(missing_ok=True)
@@ -219,25 +286,26 @@ def upload_thumbnail_to_s3(job_id: str, local_jpg: Path) -> Optional[str]:
 
         return key
     except Exception as exc:
-        logger.error("サムネイル S3 アップロード失敗: %s", exc)
+        logger.error("サムネイル アップロード失敗: %s", exc)
         raise
 
 
 def generate_mp4_download_url(job_id: str, expires_in: int = 3600) -> Optional[str]:
-    """
-    MP4 の S3 署名付きダウンロード URL を生成する（有効期限: デフォルト1時間）。
-    S3 が無効な場合は None を返す。
-    """
-    if not is_s3_enabled():
+    """MP4 の署名付きダウンロード URL（GCS V4 または S3）。"""
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"outputs/{job_id}.mp4"
     try:
-        url = _get_s3_client().generate_presigned_url(
-            "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": key},
-            ExpiresIn=expires_in,
-        )
+        if kind == "gcs":
+            url = _gcs_signed_url(key, expires_in)
+        else:
+            url = _get_s3_client().generate_presigned_url(
+                "get_object",
+                Params={"Bucket": S3_BUCKET, "Key": key},
+                ExpiresIn=expires_in,
+            )
         logger.debug("MP4 署名付き URL を生成: %s", url[:80])
         return url
     except Exception as exc:
@@ -246,42 +314,40 @@ def generate_mp4_download_url(job_id: str, expires_in: int = 3600) -> Optional[s
 
 
 def generate_mp4_streaming_url(job_id: str, expires_in: int = 86400) -> Optional[str]:
-    """
-    MP4 のストリーミング用 S3 署名付き URL を生成する（有効期限: デフォルト24時間）。
-    S3 が無効な場合は None を返す。
-    """
-    if not is_s3_enabled():
+    """MP4 ストリーミング用署名付き URL。"""
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"outputs/{job_id}.mp4"
     try:
-        url = _get_s3_client().generate_presigned_url(
+        if kind == "gcs":
+            return _gcs_signed_url(key, expires_in)
+        return _get_s3_client().generate_presigned_url(
             "get_object",
             Params={"Bucket": S3_BUCKET, "Key": key},
             ExpiresIn=expires_in,
         )
-        return url
     except Exception as exc:
         logger.error("ストリーミング URL 生成失敗: %s", exc)
         return None
 
 
 def generate_thumbnail_streaming_url(job_id: str, expires_in: int = 86400) -> Optional[str]:
-    """
-    サムネイル用 S3 署名付き URL を生成する（有効期限: デフォルト24時間）。
-    S3 が無効な場合は None を返す。
-    """
-    if not is_s3_enabled():
+    """サムネイル用署名付き URL。"""
+    kind = resolve_storage_kind()
+    if kind == "local":
         return None
 
     key = f"outputs/{job_id}.jpg"
     try:
-        url = _get_s3_client().generate_presigned_url(
+        if kind == "gcs":
+            return _gcs_signed_url(key, expires_in)
+        return _get_s3_client().generate_presigned_url(
             "get_object",
             Params={"Bucket": S3_BUCKET, "Key": key},
             ExpiresIn=expires_in,
         )
-        return url
     except Exception as exc:
         logger.error("サムネイル URL 生成失敗: %s", exc)
         return None
@@ -303,10 +369,33 @@ def delete_job_outputs(
     uploads_dir: Optional[Path] = None,
 ) -> None:
     """
-    動画レコード削除時に、S3 およびローカルのジョブ成果物をベストエフォートで削除する。
-    失敗しても例外は握りつぶす（DB は既に削除済みの想定）。
+    動画レコード削除時に、GCS / S3 およびローカルのジョブ成果物をベストエフォートで削除する。
     """
-    if is_s3_enabled():
+    kind = resolve_storage_kind()
+    if kind == "gcs":
+        from google.cloud.exceptions import NotFound
+
+        prefix = f"uploads/{job_id}/"
+        keys = [f"outputs/{job_id}.mp4", f"outputs/{job_id}.jpg"]
+        try:
+            bucket = _gcs_bucket()
+            for key in keys:
+                try:
+                    bucket.blob(key).delete()
+                except NotFound:
+                    pass
+                except Exception as exc:
+                    logger.warning("GCS オブジェクト削除失敗（無視） key=%s: %s", key, exc)
+            for blob in bucket.list_blobs(prefix=prefix):
+                try:
+                    blob.delete()
+                except Exception as exc:
+                    logger.warning("GCS 削除失敗（無視） %s: %s", blob.name, exc)
+            logger.debug("GCS ジョブ出力削除 job_id=%s", job_id)
+        except Exception as exc:
+            logger.warning("GCS ジョブ出力削除失敗（無視） job_id=%s: %s", job_id, exc)
+
+    elif kind == "s3":
         keys = [f"outputs/{job_id}.mp4", f"outputs/{job_id}.jpg"]
         prefix = f"uploads/{job_id}/"
         try:
