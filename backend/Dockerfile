@@ -10,39 +10,18 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PIP_NO_CACHE_DIR=1
 
-# ffmpeg/ffprobe (thumbnails, duration) + Playwright Chromium system deps + git (wiki sync)
-# xvfb: virtual display for headed Chromium (remote NotebookLM login on headless Cloud Run)
+# ffmpeg/ffprobe (thumbnails, duration) + git (wiki sync)
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     openssh-client \
-    xvfb \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libpango-1.0-0 \
-    libcairo2 \
-    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt \
-    && python -m playwright install-deps chromium \
-    && python -m playwright install chromium
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

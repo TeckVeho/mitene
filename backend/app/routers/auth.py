@@ -12,10 +12,12 @@ from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 
 import database
-from app.config import FRONTEND_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+import json
+from app.config import FRONTEND_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, STORAGE_STATE
 from app.dependencies import require_admin_user
-from app.schemas.auth import AuthStatus, LoginResponse
+from app.schemas.auth import AuthStatus, LoginResponse, UploadSessionRequest
 from app.services.notebooklm_auth import check_auth_status_strict, find_notebooklm
+from app.services.notebooklm_gcs import upload_storage_state_if_configured
 from app.services.oauth import allowed_oauth_frontends, oauth_state_decode, oauth_state_encode, resolve_oauth_frontend
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -41,6 +43,65 @@ async def trigger_login(_admin: Annotated[dict, Depends(require_admin_user)]):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ログイン起動に失敗しました: {e}")
+
+
+@router.post("/upload-session", response_model=LoginResponse)
+async def upload_session(
+    payload: UploadSessionRequest,
+    _admin: Annotated[dict, Depends(require_admin_user)]
+):
+    """Save manual Cookie-Editor JSON to Playwright storage_state and upload to GCS."""
+    try:
+        raw_data = json.loads(payload.session_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format.")
+
+    if not isinstance(raw_data, list):
+        raise HTTPException(status_code=400, detail="Expected a JSON array of cookies from Cookie-Editor.")
+
+    converted_cookies = []
+    for c in raw_data:
+        same_site_raw = c.get("sameSite", "").lower()
+        if same_site_raw in ["no_restriction", "none"]:
+            same_site = "None"
+        elif same_site_raw == "strict":
+            same_site = "Strict"
+        else:
+            same_site = "Lax"
+
+        converted = {
+            "name": c.get("name", ""),
+            "value": c.get("value", ""),
+            "domain": c.get("domain", ""),
+            "path": c.get("path", "/"),
+            "expires": c.get("expirationDate", -1),
+            "httpOnly": c.get("httpOnly", False),
+            "secure": c.get("secure", False),
+            "sameSite": same_site
+        }
+        if converted["name"] and converted["value"]:
+            converted_cookies.append(converted)
+
+    if not converted_cookies:
+        raise HTTPException(status_code=400, detail="No valid cookies found in the provided JSON.")
+
+    playwright_state = {
+        "cookies": converted_cookies,
+        "origins": []
+    }
+
+    try:
+        STORAGE_STATE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with open(STORAGE_STATE, "w", encoding="utf-8") as f:
+            json.dump(playwright_state, f, indent=2)
+        STORAGE_STATE.chmod(0o600)
+
+        upload_storage_state_if_configured()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save storage state: {e}")
+
+    return LoginResponse(message="認証情報を保存しました。")
+
 
 
 @router.get("/github")

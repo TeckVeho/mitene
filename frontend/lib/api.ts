@@ -228,6 +228,19 @@ async function realGetApiInfo(): Promise<ApiInfo> {
   return res.json();
 }
 
+async function realUploadNotebookLMSession(sessionJson: string): Promise<{ message: string }> {
+  const res = await fetch(`${BASE_URL}/auth/upload-session`, {
+    method: "POST",
+    headers: getHeaders() as Record<string, string>,
+    body: JSON.stringify({ session_json: sessionJson }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "セッションのアップロードに失敗しました");
+  }
+  return res.json();
+}
+
 async function realGetWikiSyncStatus(): Promise<WikiSyncStatus> {
   const res = await fetch(`${BASE_URL}/wiki/sync-status`, withUserAuth());
   if (!res.ok) throw new Error("Wiki同期状態の取得に失敗しました");
@@ -360,6 +373,7 @@ export const api = {
 
   getAuthStatus: realGetAuthStatus,
   triggerLogin: realTriggerLogin,
+  uploadNotebookLMSession: realUploadNotebookLMSession,
   getApiInfo: realGetApiInfo,
 
   getComments: realGetComments,

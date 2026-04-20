@@ -17,10 +17,12 @@ import {
   Play,
   Monitor,
   RefreshCw,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const RemoteLoginModal = lazy(() => import("@/components/auth/RemoteLoginModal"));
+const UploadSessionModal = lazy(() => import("@/components/auth/UploadSessionModal"));
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -67,6 +69,7 @@ export default function AdminPage() {
   const { t, locale } = useLocale();
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [remoteLoginOpen, setRemoteLoginOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const AUTH_CONFIG = getAuthConfig(t);
 
   const { data: gateUser, isLoading: gateAuthLoading } = useQuery({
@@ -397,6 +400,17 @@ export default function AdminPage() {
 
             {authState !== "authenticated" && (
               <div className="flex gap-2">
+                {process.env.NEXT_PUBLIC_STORAGE_BACKEND === "gcs" && (
+                  <Button
+                    size="sm"
+                    className="flex-1 gap-1.5 border-primary text-primary hover:bg-primary/5"
+                    variant="outline"
+                    onClick={() => setUploadOpen(true)}
+                  >
+                    <Save className="size-3.5" />
+                    Save credential
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   className="flex-1 gap-1.5"
@@ -475,6 +489,14 @@ export default function AdminPage() {
       </Card>
       {/* Remote Login Modal */}
       <Suspense fallback={null}>
+        <UploadSessionModal
+          open={uploadOpen}
+          onClose={() => setUploadOpen(false)}
+          onAuthSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+            setSyncMessage("NotebookLM認証を保存しました。状態が更新されない場合はGoogleに再ログインしてください。");
+          }}
+        />
         <RemoteLoginModal
           open={remoteLoginOpen}
           onClose={() => setRemoteLoginOpen(false)}

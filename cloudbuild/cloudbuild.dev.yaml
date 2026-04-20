@@ -41,6 +41,7 @@ steps:
         docker build \
           --build-arg NEXT_PUBLIC_API_URL=${_NEXT_PUBLIC_API_URL} \
           --build-arg NEXT_PUBLIC_BASE_URL=${_NEXT_PUBLIC_BASE_URL} \
+          --build-arg NEXT_PUBLIC_STORAGE_BACKEND=${_NEXT_PUBLIC_STORAGE_BACKEND} \
           --cache-from ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG} \
           -t ${_REGION}-docker.pkg.dev/${_AR_PROJECT_ID}/${_REPO}/mitene-web:${_TAG} \
           .
@@ -87,6 +88,7 @@ substitutions:
   _DEPLOY_PROJECT_ID: ''
   _NEXT_PUBLIC_API_URL: 'https://mitene-api-dev-739321310569.asia-northeast1.run.app/api'
   _NEXT_PUBLIC_BASE_URL: 'https://mitene-web-dev-739321310569.asia-northeast1.run.app'
+  _NEXT_PUBLIC_STORAGE_BACKEND: 'gcs'
 
 options:
   logging: CLOUD_LOGGING_ONLY
