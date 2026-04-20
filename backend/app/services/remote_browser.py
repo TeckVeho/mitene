@@ -15,7 +15,6 @@ import logging
 import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -60,16 +59,24 @@ class RemoteBrowserSession:
             from playwright.async_api import async_playwright
 
             # Auto-start Xvfb virtual display if no $DISPLAY on headless servers
-            if not os.environ.get("DISPLAY") and shutil.which("Xvfb"):
-                display_num = "99"
-                self._xvfb_proc = subprocess.Popen(
-                    ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24", "-ac"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                os.environ["DISPLAY"] = f":{display_num}"
-                await asyncio.sleep(0.5)
-                logger.info("Started Xvfb virtual display on :%s", display_num)
+            if not os.environ.get("DISPLAY"):
+                if shutil.which("Xvfb"):
+                    display_num = "99"
+                    self._xvfb_proc = subprocess.Popen(
+                        ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24", "-ac"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    os.environ["DISPLAY"] = f":{display_num}"
+                    await asyncio.sleep(0.5)
+                    logger.info("Started Xvfb virtual display on :%s", display_num)
+                else:
+                    err = (
+                        "Remote login: no DISPLAY and Xvfb not found in PATH; "
+                        "headed Chromium cannot start. Install xvfb in the API image."
+                    )
+                    logger.error(err)
+                    raise RuntimeError(err)
 
             self._playwright = await async_playwright().start()
 

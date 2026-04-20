@@ -14,10 +14,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # ffmpeg/ffprobe (thumbnails, duration) + Playwright Chromium system deps + git (wiki sync)
+# xvfb: virtual display for headed Chromium (remote NotebookLM login on headless Cloud Run)
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     openssh-client \
+    xvfb \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \

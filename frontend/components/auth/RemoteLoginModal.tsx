@@ -74,7 +74,8 @@ export default function RemoteLoginModal({ open, onClose, onAuthSaved }: RemoteL
     setStatusMsg("ブラウザに接続中...");
     setImgSrc(null);
 
-    const ws = new WebSocket(getWsUrl());
+    const wsUrl = getWsUrl();
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -106,11 +107,17 @@ export default function RemoteLoginModal({ open, onClose, onAuthSaved }: RemoteL
     };
 
     ws.onerror = () => {
+      console.warn("[RemoteLogin] WebSocket error", { url: wsUrl });
       updateStatus("error");
       setStatusMsg("WebSocket接続エラー");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      console.warn("[RemoteLogin] WebSocket closed", {
+        url: wsUrl,
+        code: ev.code,
+        reason: ev.reason,
+      });
       const cur = statusRef.current;
       if (cur !== "auth_saved" && cur !== "cancelled" && cur !== "error") {
         updateStatus("closed");
