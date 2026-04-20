@@ -7,3 +7,8 @@ class AuthStatus(BaseModel):
 
 class LoginResponse(BaseModel):
     message: str
+
+
+class UploadSessionRequest(BaseModel):
+    session_json: str
+
