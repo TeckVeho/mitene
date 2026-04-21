@@ -68,43 +68,38 @@ def _sync_run_cloud_run_job(job_id: str) -> Optional[str]:
             ],
         ),
     )
-    operation = client.run_job(request=request)
+    # Fire-and-forget: do NOT poll the LRO. Polling calls operations.get which
+    # requires run.operations.get permission (not included in roles/run.jobsExecutorWithOverrides).
+    # The initial RunJob response already includes metadata.execution because Cloud Run
+    # creates the execution synchronously at accept time.
+    try:
+        operation = client.run_job(request=request)
+    except gexc.GoogleAPICallError as exc:
+        logger.error(
+            "RunJob API error job_id=%s code=%s message=%s resource=%s",
+            job_id,
+            exc.__class__.__name__,
+            getattr(exc, "message", str(exc)),
+            request.name,
+        )
+        raise
 
-    import time
-
-    def _execution_from_meta(meta) -> Optional[str]:
-        if meta is None:
-            return None
+    execution: Optional[str] = None
+    meta = getattr(operation, "metadata", None)
+    if meta is not None:
         ex = getattr(meta, "execution", None)
         if isinstance(ex, str) and ex.strip():
-            return ex.strip()
-        return None
-
-    # google.api_core.operation.Operation has no reload(); done() refreshes LRO state.
-    execution = _execution_from_meta(operation.metadata)
-    deadline = time.monotonic() + 25.0
-    while execution is None and time.monotonic() < deadline:
-        _ = operation.done()
-        execution = _execution_from_meta(operation.metadata)
-        if execution is not None:
-            break
-        if operation.done():
-            break
-        time.sleep(0.15)
-
-    if execution is None and operation.done():
-        try:
-            operation.result(timeout=30)
-        except gexc.GoogleAPIError as exc:
-            logger.error("RunJob LRO error job_id=%s: %s", job_id, exc)
-        execution = _execution_from_meta(operation.metadata)
+            execution = ex.strip()
 
     if execution:
         logger.info("Cloud Run Job started job_id=%s execution=%s", job_id, execution)
     else:
-        logger.warning(
-            "RunJob did not return execution metadata within wait window job_id=%s",
+        op_proto = getattr(operation, "operation", None)
+        op_name = getattr(op_proto, "name", None) if op_proto is not None else None
+        logger.info(
+            "Cloud Run Job dispatched job_id=%s operation=%s (execution name not in initial metadata)",
             job_id,
+            op_name,
         )
     return execution
 
