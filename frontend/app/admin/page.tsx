@@ -16,6 +16,7 @@ import {
   Play,
   Monitor,
   RefreshCw,
+  UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -67,6 +68,7 @@ export default function AdminPage() {
   const { t, locale } = useLocale();
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [remoteLoginOpen, setRemoteLoginOpen] = useState(false);
+  const [credentialModalOpen, setCredentialModalOpen] = useState(false);
   const AUTH_CONFIG = getAuthConfig(t);
 
   const { data: gateUser, isLoading: gateAuthLoading } = useQuery({
@@ -388,30 +390,23 @@ export default function AdminPage() {
             </p>
 
             {authState !== "authenticated" && (
-              <div className="space-y-4">
-                <Suspense
-                  fallback={
-                    <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                      認証フォームを読み込み中…
-                    </div>
-                  }
+              <div className="space-y-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-primary text-primary hover:bg-primary/5 w-full sm:w-auto"
+                  onClick={() => setCredentialModalOpen(true)}
                 >
-                  <UploadSessionModal
-                    onAuthSaved={() => {
-                      queryClient.invalidateQueries({ queryKey: ["auth-status"] });
-                      setSyncMessage(
-                        "NotebookLM認証を保存しました。状態が更新されない場合はGoogleに再ログインしてください。"
-                      );
-                    }}
-                  />
-                </Suspense>
+                  <UploadCloud className="size-3.5" />
+                  {t.admin.notebookLMSaveCookieButton}
+                </Button>
                 {process.env.NEXT_PUBLIC_STORAGE_BACKEND !== "gcs" && (
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 space-y-2">
-                    <p className="text-xs font-medium text-foreground">別手段: リモートログイン（ブラウザ操作）</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      上の JSON / ファイルアップロードとは無関係です。ローカル実行時など、VNC 的にブラウザで Google にログインする場合に使います。
-                    </p>
+                    <p className="text-xs font-medium text-foreground">{t.admin.adminRemoteLoginTitle}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{t.admin.adminRemoteLoginNote}</p>
                     <Button
+                      type="button"
                       size="sm"
                       variant="outline"
                       className="gap-1.5 border-primary text-primary hover:bg-primary/5 w-full sm:w-auto"
@@ -477,6 +472,16 @@ export default function AdminPage() {
         </CardContent>
       </Card>
       <Suspense fallback={null}>
+        <UploadSessionModal
+          open={credentialModalOpen}
+          onClose={() => setCredentialModalOpen(false)}
+          onAuthSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+            setSyncMessage(
+              "NotebookLM認証を保存しました。状態が更新されない場合はGoogleに再ログインしてください。"
+            );
+          }}
+        />
         <RemoteLoginModal
           open={remoteLoginOpen}
           onClose={() => setRemoteLoginOpen(false)}

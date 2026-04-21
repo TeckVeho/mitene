@@ -90,6 +90,21 @@ export const ja: Translations = {
     fullResync: "全件再同期",
     notebookLMAuth: "NotebookLM 認証",
     notebookLMDesc: "NotebookLM へのアクセスには Google アカウント認証が必要です。セッションが切れた場合は再ログインしてください。",
+    notebookLMSaveCookieButton: "Cookie を保存",
+    notebookLMCookieModalTitle: "NotebookLM セッション（JSON ファイル）",
+    notebookLMCookieModalStep1:
+      "Chrome に拡張機能「Cookie & Storage Exporter」をインストールします（Chrome ウェブストアで検索して追加）。",
+    notebookLMCookieModalStep2:
+      " を開き、使用する Google アカウントでログインした状態にします。",
+    notebookLMCookieModalStep3:
+      "拡張機能から当該タブの Cookie / ストレージを JSON でエクスポートし、下のボタンでそのファイルをアップロードします。",
+    notebookLMCookieModalSidNote:
+      "エクスポートした JSON には Google セッション用の SID などが含まれている必要があります。httpOnly の Cookie が欠ける形式だと保存後も認証に失敗します。",
+    notebookLMCookieUploadButton: "JSON ファイルを選択",
+    notebookLMCookieUploading: "アップロード中…",
+    adminRemoteLoginTitle: "別手段: リモートログイン（ブラウザ操作）",
+    adminRemoteLoginNote:
+      "ブラウザで Google にログインする別手段です。Cookie JSON ファイルのアップロードとは独立しています。",
     reLogin: "再ログイン",
     articlesVideos: "記事・動画管理",
     noArticles: "記事がありません。管理画面からディレクトリを選択して動画作成を実行してください。",

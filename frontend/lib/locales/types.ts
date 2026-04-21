@@ -109,6 +109,16 @@ export interface Translations {
     fullResync: string;
     notebookLMAuth: string;
     notebookLMDesc: string;
+    notebookLMSaveCookieButton: string;
+    notebookLMCookieModalTitle: string;
+    notebookLMCookieModalStep1: string;
+    notebookLMCookieModalStep2: string;
+    notebookLMCookieModalStep3: string;
+    notebookLMCookieModalSidNote: string;
+    notebookLMCookieUploadButton: string;
+    notebookLMCookieUploading: string;
+    adminRemoteLoginTitle: string;
+    adminRemoteLoginNote: string;
     reLogin: string;
     articlesVideos: string;
     noArticles: string;

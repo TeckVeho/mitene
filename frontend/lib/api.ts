@@ -241,19 +241,6 @@ function uploadSessionErrorMessage(data: unknown): string {
   return "セッションのアップロードに失敗しました";
 }
 
-async function realUploadNotebookLMSession(sessionJson: string): Promise<{ message: string }> {
-  const res = await fetch(`${BASE_URL}/auth/upload-session`, {
-    method: "POST",
-    headers: getHeaders() as Record<string, string>,
-    body: JSON.stringify({ session_json: sessionJson }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(uploadSessionErrorMessage(data));
-  }
-  return res.json();
-}
-
 async function realUploadNotebookLMSessionFile(file: File): Promise<{ message: string }> {
   const fd = new FormData();
   fd.append("file", file);
@@ -401,7 +388,6 @@ export const api = {
 
   getAuthStatus: realGetAuthStatus,
   triggerLogin: realTriggerLogin,
-  uploadNotebookLMSession: realUploadNotebookLMSession,
   uploadNotebookLMSessionFile: realUploadNotebookLMSessionFile,
   getApiInfo: realGetApiInfo,
 
