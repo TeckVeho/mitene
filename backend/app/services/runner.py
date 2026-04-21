@@ -459,6 +459,14 @@ async def run_job(
                 store_update, job_id, steps, "download_ready", "in_progress",
                 message="MP4ファイルをダウンロード中..."
             )
+            # notebooklm-py reads storage_state.json from disk again for MP4 download; refresh
+            # from GCS when sync is enabled so the file exists after cold start or rare races.
+            logger.info(
+                "run_job refresh NotebookLM storage from GCS before download_video job_id=%s path=%s",
+                job_id,
+                STORAGE_STATE,
+            )
+            download_storage_state_if_configured()
             await client.artifacts.download_video(nb.id, str(output_path))
             logger.info(
                 "run_job video downloaded job_id=%s notebook_id=%s output_path=%s",
