@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 async def _async_main() -> int:
     import app.config  # noqa: F401 — load_dotenv
     import database as db
+    import storage as storage_mod
     from app.config import OUTPUTS_DIR, UPLOADS_DIR
     from app.services.notebooklm_gcs import (
         download_storage_state_if_configured,
@@ -36,11 +37,18 @@ async def _async_main() -> int:
         logger.error("JOB_ID が設定されていません")
         return 1
 
+    logger.info("worker start job_id=%s", job_id)
     log_notebooklm_storage_config()
     download_storage_state_if_configured()
     await db.init_db()
     try:
         job = await db.store_get(job_id)
+        logger.info(
+            "worker loaded job row job_id=%s status=%s execution_name=%s",
+            job_id,
+            job.get("status"),
+            job.get("executionName"),
+        )
         raw_names = (job.get("sourceFileNames") or job.get("csvFileNames") or "").strip()
         if not raw_names:
             logger.error("ジョブにソースファイル名がありません job_id=%s", job_id)
@@ -50,21 +58,44 @@ async def _async_main() -> int:
         source_paths: list[Path] = []
         for fn in files:
             p = UPLOADS_DIR / f"{job_id}_{fn}"
-            if not p.is_file():
-                logger.error("ソースファイルが見つかりません: %s", p)
+            if p.is_file():
+                logger.info("worker source local hit job_id=%s path=%s", job_id, p)
+                source_paths.append(p)
+                continue
+
+            logger.info(
+                "worker source local miss job_id=%s filename=%s path=%s, attempting restore",
+                job_id,
+                fn,
+                p,
+            )
+            restored = storage_mod.restore_source_file_locally(UPLOADS_DIR, job_id, fn)
+            if restored is None:
+                logger.error(
+                    "worker source unavailable job_id=%s filename=%s path=%s",
+                    job_id,
+                    fn,
+                    p,
+                )
                 try:
                     await db.store_update(
                         job_id,
                         status="error",
-                        errorMessage=f"ソースファイルが見つかりません: {p}",
+                        errorMessage=f"Source file is missing locally and remotely: {p}",
                     )
                 except Exception:
                     pass
                 await _mark_video_failed_for_job(job_id)
                 return 1
-            source_paths.append(p)
+            source_paths.append(restored)
 
         output_path = OUTPUTS_DIR / f"{job_id}.mp4"
+        logger.info(
+            "worker invoking run_job job_id=%s source_count=%d output_path=%s",
+            job_id,
+            len(source_paths),
+            output_path,
+        )
 
         await run_job(
             job_id=job_id,
@@ -80,9 +111,10 @@ async def _async_main() -> int:
             callback_url=job.get("callbackUrl"),
             semaphore=None,
         )
+        logger.info("worker finished successfully job_id=%s", job_id)
         return 0
     except Exception:
-        logger.exception("worker_entrypoint 失敗 job_id=%s", job_id)
+        logger.exception("worker_entrypoint failed job_id=%s", job_id)
         return 1
     finally:
         try:
