@@ -13,6 +13,7 @@ S3_BUCKET_NAME 環境変数が設定されている場合、MP4 生成後に S3 
 import asyncio
 import logging
 import os
+import time
 import traceback
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
@@ -33,6 +34,18 @@ STEP_IDS = [
     "wait_completion",
     "download_ready",
 ]
+
+# Clamp job `timeout` for download / MP4 upload phases (no env vars).
+_DOWNLOAD_OR_UPLOAD_TIMEOUT_MIN_SEC = 600
+_DOWNLOAD_OR_UPLOAD_TIMEOUT_MAX_SEC = 7200
+
+
+def _effective_phase_timeout_sec(job_timeout: int) -> int:
+    return max(
+        _DOWNLOAD_OR_UPLOAD_TIMEOUT_MIN_SEC,
+        min(_DOWNLOAD_OR_UPLOAD_TIMEOUT_MAX_SEC, job_timeout),
+    )
+
 
 StoreUpdateFn = Callable[..., Awaitable[dict]]
 
@@ -466,13 +479,65 @@ async def run_job(
                 job_id,
                 STORAGE_STATE,
             )
+            t_sync_start = time.monotonic()
             download_storage_state_if_configured()
-            await client.artifacts.download_video(nb.id, str(output_path))
+            sync_elapsed = time.monotonic() - t_sync_start
             logger.info(
-                "run_job video downloaded job_id=%s notebook_id=%s output_path=%s",
+                "run_job storage sync before download done job_id=%s elapsed_sec=%.3f",
+                job_id,
+                sync_elapsed,
+            )
+
+            effective_download_timeout = _effective_phase_timeout_sec(timeout)
+            logger.info(
+                "run_job download_video start job_id=%s notebook_id=%s output_path=%s timeout_sec=%s",
                 job_id,
                 nb.id,
                 output_path,
+                effective_download_timeout,
+            )
+            t_dl_start = time.monotonic()
+            try:
+                await asyncio.wait_for(
+                    client.artifacts.download_video(nb.id, str(output_path)),
+                    timeout=effective_download_timeout,
+                )
+            except asyncio.TimeoutError:
+                dl_elapsed = time.monotonic() - t_dl_start
+                error_msg = (
+                    f"MP4 のダウンロードが {effective_download_timeout} 秒以内に完了しませんでした。"
+                    f"（経過 {dl_elapsed:.1f} 秒）ネットワークまたは NotebookLM 側の応答を確認してください。"
+                )
+                logger.error(
+                    "run_job download_video timeout job_id=%s notebook_id=%s timeout_sec=%s elapsed_sec=%.3f",
+                    job_id,
+                    nb.id,
+                    effective_download_timeout,
+                    dl_elapsed,
+                )
+                await _fail_job(store_update, job_id, steps, "download_ready", error_msg)
+                if callback_url:
+                    await send_webhook(
+                        callback_url,
+                        {
+                            "event": "job.error",
+                            "job_id": job_id,
+                            "status": "error",
+                            "error_message": error_msg,
+                        },
+                    )
+                return
+
+            dl_elapsed = time.monotonic() - t_dl_start
+            out_size = output_path.stat().st_size if output_path.is_file() else 0
+            logger.info(
+                "run_job video downloaded job_id=%s notebook_id=%s output_path=%s "
+                "size_bytes=%s elapsed_sec=%.3f",
+                job_id,
+                nb.id,
+                output_path,
+                out_size,
+                dl_elapsed,
             )
 
             thumbnail_path: Optional[Path] = None
@@ -522,10 +587,52 @@ async def run_job(
                     store_update, job_id, steps, "download_ready", "in_progress",
                     message="MP4 を S3 にアップロード中..."
                 )
-                await asyncio.get_event_loop().run_in_executor(
-                    None, storage_mod.upload_mp4_to_s3, job_id, output_path
+                effective_upload_timeout = _effective_phase_timeout_sec(timeout)
+                logger.info(
+                    "run_job mp4 remote upload start job_id=%s output_path=%s timeout_sec=%s",
+                    job_id,
+                    output_path,
+                    effective_upload_timeout,
                 )
-                logger.info("run_job s3 upload success job_id=%s", job_id)
+                t_up_start = time.monotonic()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None, storage_mod.upload_mp4_to_s3, job_id, output_path
+                        ),
+                        timeout=effective_upload_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    up_elapsed = time.monotonic() - t_up_start
+                    error_msg = (
+                        f"MP4 のオブジェクトストレージへのアップロードが "
+                        f"{effective_upload_timeout} 秒以内に完了しませんでした。"
+                        f"（経過 {up_elapsed:.1f} 秒）"
+                    )
+                    logger.error(
+                        "run_job mp4 upload timeout job_id=%s timeout_sec=%s elapsed_sec=%.3f",
+                        job_id,
+                        effective_upload_timeout,
+                        up_elapsed,
+                    )
+                    await _fail_job(store_update, job_id, steps, "download_ready", error_msg)
+                    if callback_url:
+                        await send_webhook(
+                            callback_url,
+                            {
+                                "event": "job.error",
+                                "job_id": job_id,
+                                "status": "error",
+                                "error_message": error_msg,
+                            },
+                        )
+                    return
+
+                logger.info(
+                    "run_job s3 upload success job_id=%s elapsed_sec=%.3f",
+                    job_id,
+                    time.monotonic() - t_up_start,
+                )
 
             steps = await _set_step_status(
                 store_update, job_id, steps, "download_ready", "completed"
