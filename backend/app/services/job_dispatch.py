@@ -72,28 +72,32 @@ def _sync_run_cloud_run_job(job_id: str) -> Optional[str]:
 
     import time
 
+    def _execution_from_meta(meta) -> Optional[str]:
+        if meta is None:
+            return None
+        ex = getattr(meta, "execution", None)
+        if isinstance(ex, str) and ex.strip():
+            return ex.strip()
+        return None
+
+    # google.api_core.operation.Operation has no reload(); done() refreshes LRO state.
+    execution = _execution_from_meta(operation.metadata)
     deadline = time.monotonic() + 25.0
-    execution: Optional[str] = None
-    while time.monotonic() < deadline:
-        operation.reload()
-        meta = operation.metadata
-        if meta is not None:
-            ex = getattr(meta, "execution", None)
-            if isinstance(ex, str) and ex.strip():
-                execution = ex.strip()
-                break
+    while execution is None and time.monotonic() < deadline:
+        _ = operation.done()
+        execution = _execution_from_meta(operation.metadata)
+        if execution is not None:
+            break
         if operation.done():
-            try:
-                operation.result(timeout=30)
-            except gexc.GoogleAPIError as exc:
-                logger.error("RunJob LRO error job_id=%s: %s", job_id, exc)
-            meta = operation.metadata
-            if meta is not None:
-                ex = getattr(meta, "execution", None)
-                if isinstance(ex, str) and ex.strip():
-                    execution = ex.strip()
             break
         time.sleep(0.15)
+
+    if execution is None and operation.done():
+        try:
+            operation.result(timeout=30)
+        except gexc.GoogleAPIError as exc:
+            logger.error("RunJob LRO error job_id=%s: %s", job_id, exc)
+        execution = _execution_from_meta(operation.metadata)
 
     if execution:
         logger.info("Cloud Run Job started job_id=%s execution=%s", job_id, execution)
