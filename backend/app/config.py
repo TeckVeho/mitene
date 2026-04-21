@@ -68,10 +68,14 @@ NOTEBOOKLM_GCS_SYNC_ENABLED = (
 
 # NotebookLM Playwright session file.
 # On GCP + GCS_BUCKET: default to /tmp (writable) and sync from GCS on startup / after login.
+# Some notebooklm-py versions call load_httpx_cookies() without a path; they then resolve
+# ~/.notebooklm via NOTEBOOKLM_HOME. Docker user mitene has HOME=/app, so set NOTEBOOKLM_HOME
+# to match our sync dir (setdefault only — operator can override via env).
 _NOTEBOOKLM_STORAGE_STATE_RAW = os.environ.get("NOTEBOOKLM_STORAGE_STATE", "").strip()
 if _NOTEBOOKLM_STORAGE_STATE_RAW:
     STORAGE_STATE = Path(_NOTEBOOKLM_STORAGE_STATE_RAW).expanduser()
 elif NOTEBOOKLM_GCS_SYNC_ENABLED:
+    os.environ.setdefault("NOTEBOOKLM_HOME", "/tmp/.notebooklm")
     STORAGE_STATE = Path("/tmp/.notebooklm/storage_state.json")
 else:
     STORAGE_STATE = Path.home() / ".notebooklm" / "storage_state.json"

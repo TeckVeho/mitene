@@ -20,10 +20,13 @@ def log_notebooklm_storage_config() -> None:
     """Log effective paths and GCS sync flags so Cloud Run operators can verify env/IAM."""
     on_managed_google = bool(os.environ.get("K_SERVICE") or os.environ.get("GAE_SERVICE"))
     disable = os.environ.get("NOTEBOOKLM_DISABLE_GCS_SYNC", "").lower() in ("1", "true", "yes")
+    notebooklm_home = os.environ.get("NOTEBOOKLM_HOME", "").strip() or "(unset)"
     logger.info(
-        "NotebookLM storage: local_path=%s gcs_sync_enabled=%s gcs_bucket=%s gcs_object_key=%s "
-        "managed_google_runtime=%s NOTEBOOKLM_DISABLE_GCS_SYNC=%s",
+        "NotebookLM storage: local_path=%s notebooklm_home=%s gcs_sync_enabled=%s "
+        "gcs_bucket=%s gcs_object_key=%s managed_google_runtime=%s "
+        "NOTEBOOKLM_DISABLE_GCS_SYNC=%s",
         STORAGE_STATE,
+        notebooklm_home,
         NOTEBOOKLM_GCS_SYNC_ENABLED,
         GCS_BUCKET or "(unset)",
         NOTEBOOKLM_GCS_OBJECT_KEY,

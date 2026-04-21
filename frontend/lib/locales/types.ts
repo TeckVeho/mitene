@@ -114,7 +114,6 @@ export interface Translations {
     notebookLMCookieModalStep1: string;
     notebookLMCookieModalStep2: string;
     notebookLMCookieModalStep3: string;
-    notebookLMCookieModalSidNote: string;
     notebookLMCookieUploadButton: string;
     notebookLMCookieUploading: string;
     adminRemoteLoginTitle: string;
