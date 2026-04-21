@@ -12,6 +12,7 @@ from app.config import OUTPUTS_DIR
 from app.dependencies import require_admin_user
 from app.job_runtime import job_semaphore
 from app.schemas.wiki import WikiSyncDirectoryRequest
+from app.services.job_dispatch import dispatch_video_job
 from app.services.runner import run_job
 from app.services.wiki_sync import (
     get_sync_status,
@@ -66,6 +67,7 @@ async def trigger_wiki_sync_directory(
             target_paths=requested_paths,
             store_update_fn=database.store_update,
             run_job_fn=run_job,
+            dispatch_video_job_fn=dispatch_video_job,
             semaphore=job_semaphore,
             outputs_dir=OUTPUTS_DIR,
             sync_id=sync_id,

@@ -6,8 +6,8 @@ locals {
       API_URL = "https://${local.api_custom_domain_fqdn}"
     } : {},
     var.enable_web && trimspace(var.web_custom_domain) != "" ? {
-      FRONTEND_URL           = "https://${local.web_custom_domain_fqdn}"
-      CORS_ALLOWED_ORIGINS   = "https://${local.web_custom_domain_fqdn}"
+      FRONTEND_URL         = "https://${local.web_custom_domain_fqdn}"
+      CORS_ALLOWED_ORIGINS = "https://${local.web_custom_domain_fqdn}"
     } : {},
   )
 
@@ -20,13 +20,23 @@ locals {
     } : {},
   ) : {}
 
-  api_container_env = merge(
+  # API と Cloud Run Job worker で共通（worker のテンプレ env にも使う。JOB_DISPATCH は含めない）
+  api_container_env_base = merge(
     var.enable_gcs ? {
       GCS_BUCKET     = local.gcs_bucket_name_effective
       GCP_PROJECT_ID = var.project_id
     } : {},
     merge(var.env_vars, local.public_url_env_api),
   )
+
+  api_worker_dispatch_env = var.enable_cloud_run_worker ? {
+    JOB_DISPATCH_MODE         = "cloud_run_job"
+    CLOUD_RUN_WORKER_JOB_NAME = google_cloud_run_v2_job.worker[0].name
+    CLOUD_RUN_REGION          = var.region
+    GCP_PROJECT_ID            = var.project_id
+  } : {}
+
+  api_container_env = merge(local.api_container_env_base, local.api_worker_dispatch_env)
 
   web_container_env = merge(var.web_env_vars, local.public_url_env_web)
 }

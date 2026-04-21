@@ -54,16 +54,16 @@ export default function UploadSessionModal({ open, onClose, onAuthSaved }: Uploa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="relative flex w-full max-w-lg flex-col rounded-2xl border border-border bg-background shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+      <div className="relative flex w-full max-w-lg flex-col rounded-2xl border border-neutral-200 bg-white text-neutral-900 shadow-2xl dark:border-neutral-200 dark:bg-neutral-50 dark:text-neutral-900">
+        <div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-100/90 px-4 py-3 dark:bg-neutral-100">
           <div className="flex items-center gap-2">
             <UploadCloud className="size-4 shrink-0 text-primary" />
-            <span className="text-sm font-semibold text-foreground">{t.admin.notebookLMCookieModalTitle}</span>
+            <span className="text-sm font-semibold text-neutral-900">{t.admin.notebookLMCookieModalTitle}</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex size-8 items-center justify-center rounded-lg hover:bg-muted"
+            className="flex size-8 items-center justify-center rounded-lg text-neutral-600 hover:bg-neutral-200/90 disabled:opacity-50"
             aria-label="Close"
             disabled={status === "saving"}
           >
@@ -72,7 +72,7 @@ export default function UploadSessionModal({ open, onClose, onAuthSaved }: Uploa
         </div>
 
         <div className="space-y-4 p-4">
-          <ol className="list-decimal space-y-2 pl-4 text-sm text-muted-foreground marker:text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-4 text-sm text-neutral-600 marker:text-neutral-500">
             <li>
               {t.admin.notebookLMCookieModalStep1}{" "}
               <a

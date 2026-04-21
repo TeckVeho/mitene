@@ -39,6 +39,12 @@ container_port = 8080
 # cloud_run_service_name     = "mitene-api-dev"
 # web_cloud_run_service_name = "mitene-web-dev"
 
+# Video pipeline: Cloud Run Job (NotebookLM). Default false — same as EC2/local (inline asyncio in API).
+# enable_cloud_run_worker = true
+# cloud_run_worker_job_name = ""   # empty → mitene-worker-<env_suffix>
+# cloud_run_worker_memory   = "2Gi"
+# cloud_run_worker_timeout  = "7200s"
+
 # --- Plain env (no secrets; secrets → Secret Manager + *_secret_env_from_sm) ---
 
 env_vars = {
