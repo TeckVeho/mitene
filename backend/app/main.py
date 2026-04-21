@@ -23,7 +23,10 @@ from app.job_runtime import job_semaphore
 from app.routers import admin, auth, categories, comments, jobs, remote_login, settings, users, videos, wiki
 from app.routers.v1 import register_store_functions, router as v1_router
 from app.services.jobs import initial_steps
-from app.services.notebooklm_gcs import download_storage_state_if_configured
+from app.services.notebooklm_gcs import (
+    download_storage_state_if_configured,
+    log_notebooklm_storage_config,
+)
 from app.services.runner import run_job
 
 _log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -36,6 +39,7 @@ logging.getLogger("notebooklm").setLevel(logging.DEBUG)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    log_notebooklm_storage_config()
     download_storage_state_if_configured()
     await database.init_db()
     raw_store, raw_lock = database.get_raw_store()

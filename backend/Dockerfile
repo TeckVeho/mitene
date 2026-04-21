@@ -27,7 +27,7 @@ COPY . .
 
 RUN groupadd --system --gid 1000 mitene \
     && useradd --system --uid 1000 --gid mitene --home /app --shell /usr/sbin/nologin mitene \
-    && mkdir -p /app/uploads /app/outputs /home/mitene/.notebooklm \
+    && mkdir -p /app/uploads /app/outputs /app/.notebooklm \
     && chown -R mitene:mitene /app /home/mitene
 
 USER mitene

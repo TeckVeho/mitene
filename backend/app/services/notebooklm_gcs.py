@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from app.config import (
@@ -13,6 +14,30 @@ from app.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def log_notebooklm_storage_config() -> None:
+    """Log effective paths and GCS sync flags so Cloud Run operators can verify env/IAM."""
+    on_managed_google = bool(os.environ.get("K_SERVICE") or os.environ.get("GAE_SERVICE"))
+    disable = os.environ.get("NOTEBOOKLM_DISABLE_GCS_SYNC", "").lower() in ("1", "true", "yes")
+    logger.info(
+        "NotebookLM storage: local_path=%s gcs_sync_enabled=%s gcs_bucket=%s gcs_object_key=%s "
+        "managed_google_runtime=%s NOTEBOOKLM_DISABLE_GCS_SYNC=%s",
+        STORAGE_STATE,
+        NOTEBOOKLM_GCS_SYNC_ENABLED,
+        GCS_BUCKET or "(unset)",
+        NOTEBOOKLM_GCS_OBJECT_KEY,
+        on_managed_google,
+        disable,
+    )
+    if on_managed_google and not NOTEBOOKLM_GCS_SYNC_ENABLED:
+        logger.warning(
+            "NotebookLM GCS sync is disabled on this Cloud Run/App Engine revision. "
+            "Set GCS_BUCKET (and unset NOTEBOOKLM_DISABLE_GCS_SYNC) so session syncs from "
+            "gs://<bucket>/%s to a writable local file; otherwise expect path %s only.",
+            NOTEBOOKLM_GCS_OBJECT_KEY,
+            STORAGE_STATE,
+        )
 
 
 def _client():
