@@ -63,17 +63,24 @@ async def upload_session(
     for c in raw_data:
         if not isinstance(c, dict):
             continue
-        same_site_raw = (c.get("sameSite") or "").lower()
-        if same_site_raw in ["no_restriction", "none"]:
+        same_site_raw = (c.get("sameSite") or "").strip().lower()
+        if same_site_raw in ("no_restriction", "none"):
             same_site = "None"
         elif same_site_raw == "strict":
             same_site = "Strict"
+        elif same_site_raw == "lax":
+            same_site = "Lax"
+        elif not same_site_raw:
+            # Cookie Editor often exports null; secure Google cookies are commonly None in-browser.
+            same_site = "None" if c.get("secure") else "Lax"
         else:
             same_site = "Lax"
 
         expires = c.get("expirationDate", -1)
         if expires is None:
             expires = -1
+        elif isinstance(expires, (int, float)) and expires != -1:
+            expires = int(round(expires))
 
         converted = {
             "name": c.get("name") or "",

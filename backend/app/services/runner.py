@@ -20,6 +20,7 @@ from urllib.parse import urljoin
 
 import storage as storage_mod
 from app.config import STORAGE_STATE
+from app.services.notebooklm_gcs import download_storage_state_if_configured
 from webhook import send_webhook
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,8 @@ async def run_job(
     thumbnail_generated = False
 
     try:
+        download_storage_state_if_configured()
+
         async with await NotebookLMClient.from_storage(str(STORAGE_STATE)) as client:
 
             # ── Step 1: ノートブック作成 ──────────────────────────────
