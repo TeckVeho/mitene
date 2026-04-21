@@ -90,6 +90,20 @@ export const vi: Translations = {
     fullResync: "Đồng bộ lại toàn bộ",
     notebookLMAuth: "Xác thực NotebookLM",
     notebookLMDesc: "Truy cập NotebookLM yêu cầu xác thực tài khoản Google. Vui lòng đăng nhập lại nếu phiên hết hạn.",
+    notebookLMSaveCookieButton: "Lưu cookie",
+    notebookLMCookieModalTitle: "Phiên NotebookLM (file JSON)",
+    notebookLMCookieModalStep1:
+      'Cài tiện ích Chrome "Cookie & Storage Exporter" (tìm trên Chrome Web Store và thêm vào trình duyệt).',
+    notebookLMCookieModalStep2: " — mở trang và đăng nhập Google (tài khoản dùng cho NotebookLM).",
+    notebookLMCookieModalStep3:
+      "Dùng tiện ích xuất cookie/storage sang JSON cho tab đó, rồi chọn file bằng nút bên dưới để tải lên.",
+    notebookLMCookieModalSidNote:
+      "File JSON cần có cookie phiên Google (ví dụ SID). Định dạng thiếu cookie httpOnly sẽ khiến lưu xong vẫn không xác thực được.",
+    notebookLMCookieUploadButton: "Chọn file JSON",
+    notebookLMCookieUploading: "Đang tải lên…",
+    adminRemoteLoginTitle: "Cách khác: Remote Login (trình duyệt)",
+    adminRemoteLoginNote:
+      "Cách khác: đăng nhập Google trực tiếp trong trình duyệt. Không liên quan tới tải file cookie JSON ở trên.",
     reLogin: "Đăng nhập lại",
     articlesVideos: "Quản lý bài viết & video",
     noArticles: "Chưa có bài viết. Vui lòng chọn thư mục và tạo video từ trang quản trị.",

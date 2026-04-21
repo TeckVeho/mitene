@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
 from typing import Any
+
+_NUMERIC_EXPIRES = re.compile(r"^-?\d+(\.\d+)?$")
 
 
 def _same_site_value(c: dict) -> str:
@@ -30,6 +34,23 @@ def _expires_int(c: dict) -> int:
             continue
         if isinstance(v, (int, float)) and v != -1:
             return int(round(float(v)))
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                continue
+            if _NUMERIC_EXPIRES.fullmatch(s):
+                n = float(s)
+                if n != -1:
+                    return int(round(n))
+                continue
+            try:
+                iso = s[:-1] + "+00:00" if s.endswith("Z") else s
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return int(dt.timestamp())
+            except ValueError:
+                continue
     return -1
 
 
