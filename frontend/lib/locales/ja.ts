@@ -98,8 +98,6 @@ export const ja: Translations = {
       " を開き、使用する Google アカウントでログインした状態にします。",
     notebookLMCookieModalStep3:
       "拡張機能から当該タブの Cookie / ストレージを JSON でエクスポートし、下のボタンでそのファイルをアップロードします。",
-    notebookLMCookieModalSidNote:
-      "エクスポートした JSON には Google セッション用の SID などが含まれている必要があります。httpOnly の Cookie が欠ける形式だと保存後も認証に失敗します。",
     notebookLMCookieUploadButton: "JSON ファイルを選択",
     notebookLMCookieUploading: "アップロード中…",
     adminRemoteLoginTitle: "別手段: リモートログイン（ブラウザ操作）",

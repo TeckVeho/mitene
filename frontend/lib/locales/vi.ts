@@ -97,8 +97,6 @@ export const vi: Translations = {
     notebookLMCookieModalStep2: " — mở trang và đăng nhập Google (tài khoản dùng cho NotebookLM).",
     notebookLMCookieModalStep3:
       "Dùng tiện ích xuất cookie/storage sang JSON cho tab đó, rồi chọn file bằng nút bên dưới để tải lên.",
-    notebookLMCookieModalSidNote:
-      "File JSON cần có cookie phiên Google (ví dụ SID). Định dạng thiếu cookie httpOnly sẽ khiến lưu xong vẫn không xác thực được.",
     notebookLMCookieUploadButton: "Chọn file JSON",
     notebookLMCookieUploading: "Đang tải lên…",
     adminRemoteLoginTitle: "Cách khác: Remote Login (trình duyệt)",

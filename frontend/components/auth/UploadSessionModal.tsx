@@ -98,10 +98,6 @@ export default function UploadSessionModal({ open, onClose, onAuthSaved }: Uploa
             <li>{t.admin.notebookLMCookieModalStep3}</li>
           </ol>
 
-          <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs leading-relaxed text-amber-900">
-            {t.admin.notebookLMCookieModalSidNote}
-          </p>
-
           <input
             ref={fileInputRef}
             type="file"
