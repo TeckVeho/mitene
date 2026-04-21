@@ -7,7 +7,7 @@ import subprocess
 from typing import Annotated, Optional
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 
@@ -18,9 +18,20 @@ from app.dependencies import require_admin_user
 from app.schemas.auth import AuthStatus, LoginResponse, UploadSessionRequest
 from app.services.notebooklm_auth import check_auth_status_strict, find_notebooklm
 from app.services.notebooklm_gcs import upload_storage_state_if_configured
+from app.services.notebooklm_session_upload import assert_has_sid, session_json_to_playwright_state
 from app.services.oauth import allowed_oauth_frontends, oauth_state_decode, oauth_state_encode, resolve_oauth_frontend
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+_MAX_SESSION_UPLOAD_BYTES = 2 * 1024 * 1024
+
+
+def _save_playwright_state(playwright_state: dict) -> None:
+    STORAGE_STATE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(STORAGE_STATE, "w", encoding="utf-8") as f:
+        json.dump(playwright_state, f, indent=2)
+    STORAGE_STATE.chmod(0o600)
+    upload_storage_state_if_configured()
 
 
 @router.get("/status", response_model=AuthStatus)
@@ -50,68 +61,54 @@ async def upload_session(
     payload: UploadSessionRequest,
     _admin: Annotated[dict, Depends(require_admin_user)]
 ):
-    """Save manual Cookie-Editor JSON to Playwright storage_state and upload to GCS."""
+    """Save Cookie-Editor JSON array or Playwright storage_state JSON; push to GCS when configured."""
     try:
         raw_data = json.loads(payload.session_json)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format.")
 
-    if not isinstance(raw_data, list):
-        raise HTTPException(status_code=400, detail="Expected a JSON array of cookies from Cookie-Editor.")
-
-    converted_cookies = []
-    for c in raw_data:
-        if not isinstance(c, dict):
-            continue
-        same_site_raw = (c.get("sameSite") or "").strip().lower()
-        if same_site_raw in ("no_restriction", "none"):
-            same_site = "None"
-        elif same_site_raw == "strict":
-            same_site = "Strict"
-        elif same_site_raw == "lax":
-            same_site = "Lax"
-        elif not same_site_raw:
-            # Cookie Editor often exports null; secure Google cookies are commonly None in-browser.
-            same_site = "None" if c.get("secure") else "Lax"
-        else:
-            same_site = "Lax"
-
-        expires = c.get("expirationDate", -1)
-        if expires is None:
-            expires = -1
-        elif isinstance(expires, (int, float)) and expires != -1:
-            expires = int(round(expires))
-
-        converted = {
-            "name": c.get("name") or "",
-            "value": c.get("value") or "",
-            "domain": c.get("domain") or "",
-            "path": c.get("path") or "/",
-            "expires": expires,
-            "httpOnly": bool(c.get("httpOnly")),
-            "secure": bool(c.get("secure")),
-            "sameSite": same_site
-        }
-        if converted["name"] and converted["value"]:
-            converted_cookies.append(converted)
-
-    if not converted_cookies:
-        raise HTTPException(status_code=400, detail="No valid cookies found in the provided JSON.")
-
-    playwright_state = {
-        "cookies": converted_cookies,
-        "origins": []
-    }
+    try:
+        playwright_state = session_json_to_playwright_state(raw_data)
+        assert_has_sid(playwright_state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
-        STORAGE_STATE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with open(STORAGE_STATE, "w", encoding="utf-8") as f:
-            json.dump(playwright_state, f, indent=2)
-        STORAGE_STATE.chmod(0o600)
-
-        upload_storage_state_if_configured()
+        _save_playwright_state(playwright_state)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save storage state: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save storage state: {e}") from e
+
+    return LoginResponse(message="認証情報を保存しました。")
+
+
+@router.post("/upload-session-file", response_model=LoginResponse)
+async def upload_session_file(
+    _admin: Annotated[dict, Depends(require_admin_user)],
+    file: UploadFile = File(...),
+):
+    """Upload ``notebooklm_state.json`` (Playwright storage_state) or Cookie-Editor export as a file."""
+    body = await file.read()
+    if len(body) > _MAX_SESSION_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="ファイルサイズが大きすぎます（上限 2MB）。")
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=400, detail="UTF-8 の JSON ファイルを指定してください。") from e
+    try:
+        raw_data = json.loads(text)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format.")
+
+    try:
+        playwright_state = session_json_to_playwright_state(raw_data)
+        assert_has_sid(playwright_state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        _save_playwright_state(playwright_state)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save storage state: {e}") from e
 
     return LoginResponse(message="認証情報を保存しました。")
 
