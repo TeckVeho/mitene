@@ -34,6 +34,8 @@ resource "google_storage_bucket" "uploads" {
   depends_on = [google_project_service.storage]
 }
 
+# Object read/write for uploads, signed URLs, and NotebookLM storage_state.json GCS sync
+# (app/config NOTEBOOKLM_GCS_* when GCS_BUCKET is set on Cloud Run).
 resource "google_storage_bucket_iam_member" "cloudrun_gcs_admin" {
   count = var.enable_gcs ? 1 : 0
 

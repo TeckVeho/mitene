@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 
 type Status = "idle" | "saving" | "auth_saved" | "error";
 
-/** Bookmark URL field: paste this entire line. Only non-httpOnly cookies are visible to JS — use Cookie-Editor for a full session. */
+/** Bookmark URL: document.cookie cannot read httpOnly (e.g. SID). expires:-1 = Playwright session cookie when real expiry is unknown. */
 const NOTEBOOKLM_STATE_BOOKMARKLET = `javascript:(function(){
   const state = {
     cookies: document.cookie.split('; ').filter(Boolean).map(function(c) {
@@ -19,7 +19,7 @@ const NOTEBOOKLM_STATE_BOOKMARKLET = `javascript:(function(){
         value: value,
         domain: window.location.hostname,
         path: '/',
-        expires: Date.now() / 1000 + 86400,
+        expires: -1,
         secure: true,
         sameSite: 'Lax'
       };
@@ -142,10 +142,11 @@ export default function UploadSessionModal({ onAuthSaved }: UploadSessionModalPr
             {showBookmarkHelp && (
               <div className="px-4 py-3 text-sm text-muted-foreground space-y-3 border-t border-border bg-muted/10">
                 <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2 text-xs leading-relaxed">
-                  <strong>注意:</strong> ブラウザの <code className="font-mono">document.cookie</code>{" "}
-                  では <strong>httpOnly</strong> の Cookie（多くの Google セッションに必要な{" "}
-                  <code className="font-mono">SID</code> など）が読めません。ブックマークレットだけでは認証が通らない場合は、下の{" "}
-                  <strong>Cookie-Editor</strong> または <strong>notebooklm login</strong> を利用してください。
+                  <strong>注意:</strong> この方法では <code className="font-mono">document.cookie</code> 経由のため{" "}
+                  <strong>httpOnly</strong> の Cookie（<code className="font-mono">SID</code> など）が{" "}
+                  <strong>含まれません</strong>。アップロード後も管理画面が「セッション期限切れ」のままになるのは正常です。NotebookLM
+                  API を通すには、下の <strong>Cookie-Editor</strong>（JSON 配列）または <strong>notebooklm login</strong>{" "}
+                  で取得した <code className="font-mono">storage_state</code> を使ってください。
                 </p>
                 <p>新しいブックマークを作成し、次のとおりに設定します。</p>
                 <dl className="space-y-2 text-foreground">
