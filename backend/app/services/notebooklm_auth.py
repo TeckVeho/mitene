@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from app.config import AUTH_COOKIE_NAMES, STORAGE_STATE
+from app.services.notebooklm_gcs import download_storage_state_if_configured
 
 
 def check_auth_from_storage() -> str:
@@ -82,6 +83,10 @@ async def validate_auth_live() -> bool:
 
 async def check_auth_status_strict() -> str:
     """Return auth status using a live API check as the definitive source of truth."""
+    # Cloud Run: each revision instance has its own /tmp. After upload-session on instance A,
+    # the next /auth/status request may hit instance B — refresh from GCS before validating.
+    download_storage_state_if_configured()
+
     if not STORAGE_STATE.exists():
         return "not_logged_in"
 
