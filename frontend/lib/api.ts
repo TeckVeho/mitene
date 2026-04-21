@@ -228,6 +228,19 @@ async function realGetApiInfo(): Promise<ApiInfo> {
   return res.json();
 }
 
+function uploadSessionErrorMessage(data: unknown): string {
+  if (data && typeof data === "object" && "detail" in data) {
+    const d = (data as { detail: unknown }).detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+      return d
+        .map((item) => (typeof item === "object" && item && "msg" in item ? String((item as { msg: unknown }).msg) : JSON.stringify(item)))
+        .join(" ");
+    }
+  }
+  return "セッションのアップロードに失敗しました";
+}
+
 async function realUploadNotebookLMSession(sessionJson: string): Promise<{ message: string }> {
   const res = await fetch(`${BASE_URL}/auth/upload-session`, {
     method: "POST",
@@ -236,7 +249,22 @@ async function realUploadNotebookLMSession(sessionJson: string): Promise<{ messa
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || "セッションのアップロードに失敗しました");
+    throw new Error(uploadSessionErrorMessage(data));
+  }
+  return res.json();
+}
+
+async function realUploadNotebookLMSessionFile(file: File): Promise<{ message: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${BASE_URL}/auth/upload-session-file`, {
+    method: "POST",
+    ...withUserAuth(),
+    body: fd,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(uploadSessionErrorMessage(data));
   }
   return res.json();
 }
@@ -374,6 +402,7 @@ export const api = {
   getAuthStatus: realGetAuthStatus,
   triggerLogin: realTriggerLogin,
   uploadNotebookLMSession: realUploadNotebookLMSession,
+  uploadNotebookLMSessionFile: realUploadNotebookLMSessionFile,
   getApiInfo: realGetApiInfo,
 
   getComments: realGetComments,
