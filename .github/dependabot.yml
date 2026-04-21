@@ -1,9 +1,6 @@
 version: 2
 
 updates:
-  # =====================================
-  # Frontend (React / Vue - npm)
-  # =====================================
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
@@ -11,33 +8,152 @@ updates:
       day: "monday"
       time: "04:00"
       timezone: "Asia/Tokyo"
-    open-pull-requests-limit: 5
     groups:
-      production-dependencies:
-        dependency-type: production
-      development-dependencies:
-        dependency-type: development
-    labels:
-      - "dependencies"
-      - "frontend"
-    ignore:
-      # メジャーアップデートを抑制したい場合（任意）
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-  # =====================================
-  # GitHub Actions
-  # =====================================
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "04:00"
-      timezone: "Asia/Tokyo"
-    groups:
-      actions:
+      npm-frontend-production-major:
+        dependency-type: "production"
         patterns:
           - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "major"
+      npm-frontend-development-major:
+        dependency-type: "development"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "major"
+      npm-frontend-production-minor:
+        dependency-type: "production"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "minor"
+      npm-frontend-development-minor:
+        dependency-type: "development"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "minor"
+      npm-frontend-production-patch:
+        dependency-type: "production"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "patch"
+      npm-frontend-development-patch:
+        dependency-type: "development"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+          - "typescript"
+          - "react"
+          - "next"
+          - "vue"
+          - "nuxt"
+          - "nuxt3"
+          - "react-native"
+          - "expo"
+          - "vuetify"
+          - "element-plus"
+          - "express"
+          - "@nestjs/core"
+          - "@nestjs/common"
+          - "vite"
+          - "webpack"
+          - "axios"
+        update-types:
+          - "patch"
     labels:
       - "dependencies"
-      - "ci"
+      - "npm"
+      - "frontend"
