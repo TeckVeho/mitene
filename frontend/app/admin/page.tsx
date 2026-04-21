@@ -11,7 +11,6 @@ import {
   FileText,
   Video,
   Settings,
-  LogIn,
   BookOpen,
   FolderOpen,
   Play,
@@ -93,14 +92,6 @@ export default function AdminPage() {
     queryFn: () => api.getAuthStatus(),
     refetchInterval: 30000,
     enabled: gateUser?.isAdmin === true,
-  });
-
-  const { mutate: triggerLogin, isPending: isLoggingIn } = useMutation({
-    mutationFn: () => api.triggerLogin(),
-    onSuccess: (data) => {
-      setSyncMessage(data.message);
-      queryClient.invalidateQueries({ queryKey: ["auth-status"] });
-    },
   });
 
   const { data: syncStatus, refetch: refetchSyncStatus } = useQuery({
@@ -411,28 +402,17 @@ export default function AdminPage() {
                     Save credential
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  className="flex-1 gap-1.5"
-                  onClick={() => setRemoteLoginOpen(true)}
-                >
-                  <Monitor className="size-3.5" />
-                  Remote Login
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5"
-                  onClick={() => triggerLogin()}
-                  disabled={isLoggingIn}
-                >
-                  {isLoggingIn ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <LogIn className="size-3.5" />
-                  )}
-                  CLI
-                </Button>
+                {process.env.NEXT_PUBLIC_STORAGE_BACKEND !== "gcs" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 gap-1.5 border-primary text-primary hover:bg-primary/5"
+                    onClick={() => setRemoteLoginOpen(true)}
+                  >
+                    <Monitor className="size-3.5" />
+                    Remote Login
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>

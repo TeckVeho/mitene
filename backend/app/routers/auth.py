@@ -61,7 +61,9 @@ async def upload_session(
 
     converted_cookies = []
     for c in raw_data:
-        same_site_raw = c.get("sameSite", "").lower()
+        if not isinstance(c, dict):
+            continue
+        same_site_raw = (c.get("sameSite") or "").lower()
         if same_site_raw in ["no_restriction", "none"]:
             same_site = "None"
         elif same_site_raw == "strict":
@@ -69,14 +71,18 @@ async def upload_session(
         else:
             same_site = "Lax"
 
+        expires = c.get("expirationDate", -1)
+        if expires is None:
+            expires = -1
+
         converted = {
-            "name": c.get("name", ""),
-            "value": c.get("value", ""),
-            "domain": c.get("domain", ""),
-            "path": c.get("path", "/"),
-            "expires": c.get("expirationDate", -1),
-            "httpOnly": c.get("httpOnly", False),
-            "secure": c.get("secure", False),
+            "name": c.get("name") or "",
+            "value": c.get("value") or "",
+            "domain": c.get("domain") or "",
+            "path": c.get("path") or "/",
+            "expires": expires,
+            "httpOnly": bool(c.get("httpOnly")),
+            "secure": bool(c.get("secure")),
             "sameSite": same_site
         }
         if converted["name"] and converted["value"]:
