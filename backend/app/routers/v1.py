@@ -15,12 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 
 import storage as storage_mod
 from app.config import UPLOADS_DIR, OUTPUTS_DIR
+from app.services.job_dispatch import dispatch_video_job
 from auth import verify_api_key
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ class JobResponse(BaseModel):
     updatedAt: str
     completedAt: Optional[str] = None
     callbackUrl: Optional[str] = None
+    executionName: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +140,6 @@ def _now() -> str:
 )
 async def create_job_v1(
     request: ExternalJobRequest,
-    background_tasks: BackgroundTasks,
     _api_key: str = Depends(verify_api_key),
 ) -> JobResponse:
     if not request.source_files:
@@ -205,9 +206,10 @@ async def create_job_v1(
 
     await _store_fns["create"](job)
 
-    background_tasks.add_task(
-        _store_fns["run_job"],
+    await dispatch_video_job(
         job_id=job_id,
+        run_job_fn=_store_fns["run_job"],
+        store_update=_store_fns["update"],
         source_paths=source_paths,
         output_path=output_path,
         notebook_title=request.notebook_title,
@@ -216,12 +218,15 @@ async def create_job_v1(
         video_format=request.format,
         language=request.language,
         timeout=request.timeout,
-        store_update=_store_fns["update"],
         callback_url=request.callback_url,
         semaphore=_store_fns["semaphore"],
     )
 
-    return JobResponse(**job)
+    saved = await _store_fns["get"](job_id)
+    j_out = dict(saved)
+    if "csvFileNames" in j_out:
+        j_out["sourceFileNames"] = j_out.pop("csvFileNames")
+    return JobResponse(**j_out)
 
 
 @router.get(

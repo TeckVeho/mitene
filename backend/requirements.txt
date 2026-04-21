@@ -10,5 +10,7 @@ google-genai>=1.0.0
 boto3>=1.35.0
 # GCS — NotebookLM storage_state sync on Cloud Run（GCS_BUCKET 設定時）
 google-cloud-storage>=2.14.0
+# Cloud Run Job 起動（JOB_DISPATCH_MODE=cloud_run_job のときのみ）
+google-cloud-run>=0.10.0
 # MySQL / RDS 連携（DATABASE_URL 環境変数が設定されている場合に使用）
 aiomysql>=0.2.0

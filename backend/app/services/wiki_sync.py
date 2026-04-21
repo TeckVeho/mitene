@@ -459,6 +459,7 @@ async def sync_wiki_from_directory(
     target_paths: Optional[list[str]] = None,
     store_update_fn=None,
     run_job_fn=None,
+    dispatch_video_job_fn=None,
     semaphore=None,
     outputs_dir: Optional[Path] = None,
     sync_id: Optional[str] = None,
@@ -558,7 +559,7 @@ async def sync_wiki_from_directory(
                 )
                 processed += 1
 
-                if run_job_fn and store_update_fn and outputs_dir:
+                if store_update_fn and outputs_dir and (dispatch_video_job_fn or run_job_fn):
                     import uuid as _uuid
                     from datetime import datetime, timezone
 
@@ -622,9 +623,11 @@ async def sync_wiki_from_directory(
                             language=lang,
                         )
 
-                        asyncio.create_task(
-                            run_job_fn(
+                        if dispatch_video_job_fn:
+                            await dispatch_video_job_fn(
                                 job_id=job_id,
+                                run_job_fn=run_job_fn,
+                                store_update=store_update_fn,
                                 source_paths=[local_md_path],
                                 output_path=output_path,
                                 notebook_title=title,
@@ -633,10 +636,25 @@ async def sync_wiki_from_directory(
                                 video_format="explainer",
                                 language=lang,
                                 timeout=3600,
-                                store_update=store_update_fn,
+                                callback_url=None,
                                 semaphore=semaphore,
                             )
-                        )
+                        elif run_job_fn:
+                            asyncio.create_task(
+                                run_job_fn(
+                                    job_id=job_id,
+                                    source_paths=[local_md_path],
+                                    output_path=output_path,
+                                    notebook_title=title,
+                                    instructions=job["instructions"],
+                                    style="whiteboard",
+                                    video_format="explainer",
+                                    language=lang,
+                                    timeout=3600,
+                                    store_update=store_update_fn,
+                                    semaphore=semaphore,
+                                )
+                            )
                         jobs_created += 1
 
             except Exception:

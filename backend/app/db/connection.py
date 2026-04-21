@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     current_step     VARCHAR(32),
     error_message    TEXT,
     callback_url     TEXT,
+    execution_name   VARCHAR(512),
     created_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                      ON UPDATE CURRENT_TIMESTAMP(6),
@@ -202,6 +203,7 @@ CREATE TABLE IF NOT EXISTS comment_likes (
 _ALTER_TABLE_SQLS = [
     "ALTER TABLE jobs ADD COLUMN source_file_names TEXT",
     "ALTER TABLE jobs ADD COLUMN csv_file_names TEXT",
+    "ALTER TABLE jobs ADD COLUMN execution_name VARCHAR(512)",
     "ALTER TABLE videos ADD COLUMN language VARCHAR(8) NOT NULL DEFAULT 'ja'",
 ]
 
@@ -453,6 +455,7 @@ def _row_to_dict(row: dict) -> dict:
         "currentStep": row["current_step"],
         "errorMessage": row["error_message"],
         "callbackUrl": row["callback_url"],
+        "executionName": row.get("execution_name"),
         "createdAt": _fmt_ts(row["created_at"]),
         "updatedAt": _fmt_ts(row["updated_at"]),
         "completedAt": _fmt_ts(row["completed_at"]),

@@ -31,11 +31,13 @@ async def store_create(job: dict) -> dict:
                     id, job_type, source_file_names, notebook_title, instructions,
                     style, format, language, timeout,
                     status, steps, current_step, error_message, callback_url,
+                    execution_name,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
+                    %s,
                     %s, %s, %s
                 )
                 """,
@@ -54,6 +56,7 @@ async def store_create(job: dict) -> dict:
                     job.get("currentStep"),
                     job.get("errorMessage"),
                     job.get("callbackUrl"),
+                    job.get("executionName"),
                     job["createdAt"],
                     job["updatedAt"],
                     job.get("completedAt"),
@@ -134,6 +137,7 @@ async def store_update(job_id: str, **kwargs) -> dict:
         "currentStep": "current_step",
         "errorMessage": "error_message",
         "completedAt": "completed_at",
+        "executionName": "execution_name",
     }
 
     set_clauses: list[str] = []

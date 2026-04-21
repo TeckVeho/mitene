@@ -160,6 +160,37 @@ variable "cloud_run_api_concurrency" {
   description = "Max concurrent requests per API instance."
 }
 
+# --- Cloud Run Job（動画 worker）: 有効時のみ API に JOB_DISPATCH_MODE=cloud_run_job を注入 ---
+variable "enable_cloud_run_worker" {
+  type        = bool
+  default     = false
+  description = "If true, create a Cloud Run Job for NotebookLM video pipeline and grant the default Cloud Run SA permission to run it. Local/EC2: leave false (API uses inline asyncio, same as before)."
+}
+
+variable "cloud_run_worker_job_name" {
+  type        = string
+  default     = ""
+  description = "Cloud Run Job resource name. If empty, uses mitene-worker-<env_suffix>."
+}
+
+variable "cloud_run_worker_cpu" {
+  type        = string
+  default     = "1"
+  description = "CPU limit for the video worker Job container."
+}
+
+variable "cloud_run_worker_memory" {
+  type        = string
+  default     = "2Gi"
+  description = "Memory for the video worker Job (Playwright / NotebookLM)."
+}
+
+variable "cloud_run_worker_timeout" {
+  type        = string
+  default     = "7200s"
+  description = "Max duration per Job task (e.g. 7200s for long videos)."
+}
+
 # --- Cloud Run Web: scaling & resources ---
 
 variable "cloud_run_web_min_instances" {

@@ -23,6 +23,11 @@ output "cloud_run_url" {
   value       = google_cloud_run_v2_service.api.uri
 }
 
+output "cloud_run_worker_job_name" {
+  description = "Cloud Run Job name for NotebookLM video worker when enable_cloud_run_worker is true; null otherwise."
+  value       = var.enable_cloud_run_worker ? google_cloud_run_v2_job.worker[0].name : null
+}
+
 output "api_public_base_url" {
   description = "Effective public HTTPS base for the API: custom domain if api_custom_domain is set, else the default Cloud Run URL."
   value       = local.api_custom_domain_fqdn != "" ? "https://${local.api_custom_domain_fqdn}" : (google_cloud_run_v2_service.api.uri != null ? trimsuffix(google_cloud_run_v2_service.api.uri, "/") : null)

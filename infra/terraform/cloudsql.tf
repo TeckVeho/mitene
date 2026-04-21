@@ -30,7 +30,7 @@ resource "random_password" "sql_app" {
 resource "random_password" "sql_root" {
   count = var.enable_cloud_sql ? 1 : 0
 
-  length = 24
+  length      = 24
   lower       = true
   upper       = true
   numeric     = true
