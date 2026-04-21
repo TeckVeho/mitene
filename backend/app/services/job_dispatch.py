@@ -49,9 +49,9 @@ def _worker_job_resource_name() -> str:
 
 def _sync_run_cloud_run_job(job_id: str) -> Optional[str]:
     try:
-        from google.api_core import exceptions as gexc
-        from google.cloud.run_v2 import JobsClient
-        from google.cloud.run_v2.types import EnvVar, RunJobRequest
+        from google.api_core import exceptions as gexc  # pyright: ignore[reportMissingImports]
+        from google.cloud.run_v2 import JobsClient  # pyright: ignore[reportMissingImports]
+        from google.cloud.run_v2.types import EnvVar, RunJobRequest  # pyright: ignore[reportMissingImports]
     except ImportError as e:
         raise RuntimeError(
             "Install google-cloud-run: pip install google-cloud-run"
@@ -151,7 +151,10 @@ async def dispatch_video_job(
     - inline: asyncio.create_task(run_job_fn(...)) — same as local/EC2 before.
     - cloud_run_job: call RunJob; worker reads JOB_ID; returns execution resource name if available.
     """
-    if _dispatch_mode() == "cloud_run_job":
+    mode = _dispatch_mode()
+    logger.info("dispatch_video_job start job_id=%s mode=%s", job_id, mode)
+
+    if mode == "cloud_run_job":
         try:
             execution = await asyncio.to_thread(_sync_run_cloud_run_job, job_id)
         except Exception as exc:
@@ -166,6 +169,12 @@ async def dispatch_video_job(
                 logger.warning(
                     "Failed to persist executionName job_id=%s err=%s", job_id, exc
                 )
+        logger.info(
+            "dispatch_video_job success job_id=%s mode=%s execution=%s",
+            job_id,
+            mode,
+            execution,
+        )
         return execution
 
     asyncio.create_task(
@@ -184,4 +193,5 @@ async def dispatch_video_job(
             semaphore=semaphore,
         )
     )
+    logger.info("dispatch_video_job enqueued inline task job_id=%s mode=%s", job_id, mode)
     return None

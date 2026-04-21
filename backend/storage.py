@@ -128,6 +128,76 @@ def save_csv_locally(uploads_dir: Path, job_id: str, filename: str, content: byt
     return save_file_locally(uploads_dir, job_id, filename, content)
 
 
+def restore_source_file_locally(uploads_dir: Path, job_id: str, filename: str) -> Optional[Path]:
+    """
+    Restore an uploaded source file from remote object storage into ``uploads_dir``.
+
+    Returns the local path on success, or ``None`` when the active storage backend is local
+    or the remote object does not exist.
+    """
+    kind = resolve_storage_kind()
+    if kind == "local":
+        return None
+
+    local_path = uploads_dir / f"{job_id}_{filename}"
+    key = f"uploads/{job_id}/{filename}"
+
+    try:
+        if kind == "gcs":
+            blob = _gcs_bucket().blob(key)
+            if not blob.exists():
+                logger.warning(
+                    "source restore miss job_id=%s backend=gcs key=gs://%s/%s",
+                    job_id,
+                    GCS_BUCKET,
+                    key,
+                )
+                return None
+            local_path.write_bytes(blob.download_as_bytes())
+            logger.info(
+                "source restore success job_id=%s backend=gcs key=gs://%s/%s local_path=%s",
+                job_id,
+                GCS_BUCKET,
+                key,
+                local_path,
+            )
+            return local_path
+
+        if not S3_BUCKET:
+            raise RuntimeError("S3_BUCKET_NAME is not set")
+
+        try:
+            _get_s3_client().head_object(Bucket=S3_BUCKET, Key=key)
+        except Exception:
+            logger.warning(
+                "source restore miss job_id=%s backend=s3 key=s3://%s/%s",
+                job_id,
+                S3_BUCKET,
+                key,
+            )
+            return None
+
+        body = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+        local_path.write_bytes(body)
+        logger.info(
+            "source restore success job_id=%s backend=s3 key=s3://%s/%s local_path=%s",
+            job_id,
+            S3_BUCKET,
+            key,
+            local_path,
+        )
+        return local_path
+    except Exception as exc:
+        logger.exception(
+            "source restore failed job_id=%s backend=%s key=%s error=%s",
+            job_id,
+            kind,
+            key,
+            exc,
+        )
+        raise
+
+
 def upload_csv_to_s3(job_id: str, filename: str, content: bytes) -> Optional[str]:
     """
     ファイルを GCS または S3 にアップロードする。
