@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from app.config import (
@@ -23,7 +22,13 @@ def _client():
 
 
 def download_storage_state_if_configured() -> None:
-    """On startup: pull latest session file from GCS into STORAGE_STATE path if syncing is enabled."""
+    """Pull ``storage_state.json`` from GCS into ``STORAGE_STATE`` when sync is enabled.
+
+    Cloud Run keeps ``STORAGE_STATE`` under each instance's own disk (e.g. ``/tmp``). If the
+    GCS object was removed in the console but the local file remains, auth would still read
+    stale cookies. When the remote object does not exist, any existing local file is removed
+    so local state matches GCS (typically ``not_logged_in`` on the next status check).
+    """
     if not NOTEBOOKLM_GCS_SYNC_ENABLED or not GCS_BUCKET:
         return
     dest = Path(STORAGE_STATE)
@@ -36,6 +41,19 @@ def download_storage_state_if_configured() -> None:
                 GCS_BUCKET,
                 NOTEBOOKLM_GCS_OBJECT_KEY,
             )
+            if dest.is_file():
+                try:
+                    dest.unlink()
+                    logger.info(
+                        "NotebookLM GCS: removed stale local session (no remote object): %s",
+                        dest,
+                    )
+                except OSError as unlink_exc:
+                    logger.warning(
+                        "NotebookLM GCS: could not remove stale local file %s: %s",
+                        dest,
+                        unlink_exc,
+                    )
             return
         dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         blob.download_to_filename(str(dest))
