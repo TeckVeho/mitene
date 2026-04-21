@@ -582,6 +582,7 @@ async def sync_wiki_from_directory(
 
                         local_md_path = uploads_dir / f"{job_id}_{md_filename}"
                         local_md_path.write_bytes(raw)
+                        storage_mod.upload_csv_to_s3(job_id, md_filename, raw)
                         output_path = outputs_dir / f"{job_id}.mp4"
 
                         initial_steps = [
