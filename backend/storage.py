@@ -22,6 +22,10 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
+import google.auth
+import google.auth.transport.requests
+from google.oauth2 import service_account as oauth_service_account
+
 from resolve_storage import resolve_storage_kind
 
 logger = logging.getLogger(__name__)
@@ -105,12 +109,37 @@ def gcs_upload_bytes(object_key: str, data: bytes, content_type: str = "applicat
 
 
 def _gcs_signed_url(key: str, expires_in: int) -> str:
+    """
+    Cloud Run / GCE では ADC に秘密鍵が無く generate_signed_url が失敗することがある。
+    service_account_email + access_token を渡すと IAM SignBlob で署名される。
+    ローカルのサービスアカウント JSON（oauth_service_account.Credentials）は従来どおりローカル署名。
+    """
     blob = _gcs_bucket().blob(key)
-    return blob.generate_signed_url(
+    url_kwargs = dict(
         version="v4",
         expiration=timedelta(seconds=expires_in),
         method="GET",
     )
+
+    creds, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+    req = google.auth.transport.requests.Request()
+    creds.refresh(req)
+
+    if isinstance(creds, oauth_service_account.Credentials):
+        return blob.generate_signed_url(**url_kwargs)
+
+    sa_email = getattr(creds, "service_account_email", None)
+    access_token = getattr(creds, "token", None)
+    if sa_email and access_token:
+        return blob.generate_signed_url(
+            **url_kwargs,
+            service_account_email=sa_email,
+            access_token=access_token,
+        )
+
+    return blob.generate_signed_url(**url_kwargs)
 
 
 def save_file_locally(uploads_dir: Path, job_id: str, filename: str, content: bytes) -> Path:
