@@ -26,6 +26,7 @@ from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import storage as storage_mod
+from app.config import VIDEO_JOB_TIMEOUT_DEFAULT_SEC
 from resolve_storage import resolve_storage_kind
 
 logger = logging.getLogger(__name__)
@@ -602,7 +603,7 @@ async def sync_wiki_from_directory(
                             "style": "whiteboard",
                             "format": "explainer",
                             "language": lang,
-                            "timeout": 3600,
+                            "timeout": VIDEO_JOB_TIMEOUT_DEFAULT_SEC,
                             "status": "pending",
                             "steps": initial_steps,
                             "currentStep": None,
@@ -636,7 +637,7 @@ async def sync_wiki_from_directory(
                                 style="whiteboard",
                                 video_format="explainer",
                                 language=lang,
-                                timeout=3600,
+                                timeout=VIDEO_JOB_TIMEOUT_DEFAULT_SEC,
                                 callback_url=None,
                                 semaphore=semaphore,
                             )
@@ -651,7 +652,7 @@ async def sync_wiki_from_directory(
                                     style="whiteboard",
                                     video_format="explainer",
                                     language=lang,
-                                    timeout=3600,
+                                    timeout=VIDEO_JOB_TIMEOUT_DEFAULT_SEC,
                                     store_update=store_update_fn,
                                     semaphore=semaphore,
                                 )

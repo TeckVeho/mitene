@@ -44,6 +44,10 @@ container_port = 8080
 # cloud_run_worker_job_name = ""   # empty → mitene-worker-<env_suffix>
 # cloud_run_worker_memory   = "2Gi"
 # cloud_run_worker_timeout  = "7200s"
+#   Per-task ceiling for the worker container. POST /api/v1/jobs field `timeout` (seconds) must be
+#   <= this value or the job may fail mid-wait. Defaults: app VIDEO_JOB_TIMEOUT_* match 7200s; if you
+#   raise this (e.g. "14400s"), set API env VIDEO_JOB_TIMEOUT_MAX_SEC=14400 (and optionally
+#   VIDEO_JOB_TIMEOUT_DEFAULT_SEC) in env_vars below.
 
 # --- Plain env (no secrets; secrets → Secret Manager + *_secret_env_from_sm) ---
 

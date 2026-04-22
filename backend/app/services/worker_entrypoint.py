@@ -25,7 +25,7 @@ async def _async_main() -> int:
     import app.config  # noqa: F401 — load_dotenv
     import database as db
     import storage as storage_mod
-    from app.config import OUTPUTS_DIR, UPLOADS_DIR
+    from app.config import OUTPUTS_DIR, UPLOADS_DIR, VIDEO_JOB_TIMEOUT_DEFAULT_SEC
     from app.services.notebooklm_gcs import (
         download_storage_state_if_configured,
         log_notebooklm_storage_config,
@@ -106,7 +106,7 @@ async def _async_main() -> int:
             style=job.get("style") or "whiteboard",
             video_format=job.get("format") or "explainer",
             language=job.get("language") or "ja",
-            timeout=int(job.get("timeout") or 3600),
+            timeout=int(job.get("timeout") or VIDEO_JOB_TIMEOUT_DEFAULT_SEC),
             store_update=db.store_update,
             callback_url=job.get("callbackUrl"),
             semaphore=None,

@@ -17,6 +17,24 @@ OUTPUTS_DIR.mkdir(exist_ok=True)
 
 MAX_CONCURRENT_JOBS = 3
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+        return v if v > 0 else default
+    except ValueError:
+        return default
+
+
+# Video job wait (wait_completion): defaults match Terraform `cloud_run_worker_timeout` (7200s).
+# Raise `VIDEO_JOB_TIMEOUT_MAX_SEC` (API env) when you raise `cloud_run_worker_timeout` in tfvars.
+VIDEO_JOB_TIMEOUT_DEFAULT_SEC = _positive_int_env("VIDEO_JOB_TIMEOUT_DEFAULT_SEC", 7200)
+VIDEO_JOB_TIMEOUT_MAX_SEC = _positive_int_env("VIDEO_JOB_TIMEOUT_MAX_SEC", 7200)
+VIDEO_JOB_TIMEOUT_MIN_SEC = _positive_int_env("VIDEO_JOB_TIMEOUT_MIN_SEC", 300)
+
 _CORS_ORIGINS = [
     o.strip()
     for o in os.environ.get(

@@ -17,10 +17,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 import storage as storage_mod
-from app.config import UPLOADS_DIR, OUTPUTS_DIR
+from app.config import (
+    OUTPUTS_DIR,
+    UPLOADS_DIR,
+    VIDEO_JOB_TIMEOUT_DEFAULT_SEC,
+    VIDEO_JOB_TIMEOUT_MAX_SEC,
+    VIDEO_JOB_TIMEOUT_MIN_SEC,
+)
 from app.services.job_dispatch import dispatch_video_job
 from auth import verify_api_key
 
@@ -56,7 +62,11 @@ class ExternalJobRequest(BaseModel):
     style: str = "whiteboard"
     format: str = "explainer"
     language: str = "ja"
-    timeout: int = 3600
+    timeout: int = Field(
+        default=VIDEO_JOB_TIMEOUT_DEFAULT_SEC,
+        ge=VIDEO_JOB_TIMEOUT_MIN_SEC,
+        le=VIDEO_JOB_TIMEOUT_MAX_SEC,
+    )
     callback_url: Optional[str] = None
     source_files: list[MdFileInput]
 
