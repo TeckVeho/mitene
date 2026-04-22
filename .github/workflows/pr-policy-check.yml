@@ -1,0 +1,219 @@
+name: PR Policy Check
+
+on:
+  pull_request_target:
+    branches:
+      - develop
+    types:
+      - opened
+      - edited
+      - reopened
+      - ready_for_review
+
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to validate"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  validate-pr:
+    name: Validate PR body and linked issue
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout base repository
+        uses: actions/checkout@v4
+
+      - name: Validate PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const isManual = context.eventName === 'workflow_dispatch';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            let prNumber;
+            let pr;
+
+            if (isManual) {
+              prNumber = Number(context.payload.inputs.pr_number);
+
+              const { data } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+
+              pr = data;
+            } else {
+              pr = context.payload.pull_request;
+              prNumber = pr.number;
+            }
+
+            if (!pr) {
+              core.setFailed('Pull request not found.');
+              return;
+            }
+
+            const actor = context.actor || '';
+            const prAuthor = pr.user?.login || '';
+            const headRef = pr.head?.ref || '';
+
+            // Pass Dependabot pull requests without validation.
+            // This checks multiple signals because the event actor may be a human
+            // even when the PR itself was created by Dependabot.
+            const isDependabotPr =
+              actor === 'dependabot[bot]' ||
+              prAuthor === 'dependabot[bot]' ||
+              headRef.startsWith('dependabot/');
+
+            if (isDependabotPr) {
+              core.info(`PR #${prNumber} is treated as a Dependabot pull request. Pass without validation.`);
+              core.info(`actor=${actor}, prAuthor=${prAuthor}, headRef=${headRef}`);
+              return;
+            }
+
+            const body = (pr.body || '').replace(/\r\n/g, '\n').trim();
+
+            // Check that the PR body is at least 10 bytes.
+            const bodyBytes = Buffer.byteLength(body, 'utf8');
+            if (bodyBytes < 10) {
+              core.setFailed(`PR body must be at least 10 bytes. Current: ${bodyBytes} bytes.`);
+              return;
+            }
+
+            // If .github/PULL_REQUEST_TEMPLATE.md exists and is non-empty, body must not match it as-is.
+            const templatePath = path.join(process.env.GITHUB_WORKSPACE, '.github', 'PULL_REQUEST_TEMPLATE.md');
+            if (fs.existsSync(templatePath)) {
+              const template = fs.readFileSync(templatePath, 'utf8')
+                .replace(/\r\n/g, '\n')
+                .trim();
+              if (template.length > 0 && body === template) {
+                core.setFailed('PR body must not be identical to .github/PULL_REQUEST_TEMPLATE.md');
+                return;
+              }
+            }
+
+            /**
+             * GitHub recognizes closing keywords in the PR body (including cross-repository
+             * `owner/repo#number`), but GraphQL `closingIssuesReferences` may only return issues
+             * in this repository. Parse the body so cross-repo tracking issues still satisfy policy.
+             *
+             * @see https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue
+             *
+             * @param {string} text
+             * @returns {Set<string>}
+             */
+            function parseClosingReferencesFromBody(text) {
+              const refs = new Set();
+              const keyword = '(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)';
+
+              const crossRepo = new RegExp(
+                `\\b${keyword}\\s+([\\w.-]+\\/[\\w.-]+)#(\\d+)\\b`,
+                'gi',
+              );
+              let match;
+              while ((match = crossRepo.exec(text)) !== null) {
+                refs.add(`${match[1]}#${match[2]}`);
+              }
+
+              const issueUrl = new RegExp(
+                `\\b${keyword}\\s+https?://github\\.com/([\\w.-]+/[\\w.-]+)/(?:issues|pull)/(\\d+)\\b`,
+                'gi',
+              );
+              while ((match = issueUrl.exec(text)) !== null) {
+                refs.add(`${match[1]}#${match[2]}`);
+              }
+
+              const sameRepoHash = new RegExp(`\\b${keyword}\\s+#(\\d+)\\b`, 'gi');
+              while ((match = sameRepoHash.exec(text)) !== null) {
+                refs.add(`${owner}/${repo}#${match[1]}`);
+              }
+
+              const sameRepoGh = new RegExp(`\\b${keyword}\\s+GH-(\\d+)\\b`, 'gi');
+              while ((match = sameRepoGh.exec(text)) !== null) {
+                refs.add(`${owner}/${repo}#${match[1]}`);
+              }
+
+              return refs;
+            }
+
+            // Check that the PR has at least one linked issue.
+            // closingIssuesReferences covers auto-closing keywords such as "fixes #123".
+            // timelineItems with CONNECTED_EVENT covers issues linked manually from the sidebar.
+            const query = `
+              query($owner: String!, $repo: String!, $prNumber: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $prNumber) {
+                    closingIssuesReferences(first: 20) {
+                      nodes {
+                        number
+                        title
+                      }
+                    }
+                    timelineItems(first: 100, itemTypes: [CONNECTED_EVENT]) {
+                      nodes {
+                        __typename
+                        ... on ConnectedEvent {
+                          subject {
+                            __typename
+                            ... on Issue {
+                              number
+                              title
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const result = await github.graphql(query, {
+              owner,
+              repo,
+              prNumber,
+            });
+
+            const prData = result.repository.pullRequest;
+            const linkedIssueNumbers = new Set();
+
+            for (const issue of (prData.closingIssuesReferences?.nodes || [])) {
+              if (issue?.number) {
+                linkedIssueNumbers.add(issue.number);
+              }
+            }
+
+            for (const node of (prData.timelineItems?.nodes || [])) {
+              if (
+                node?.__typename === 'ConnectedEvent' &&
+                node?.subject?.__typename === 'Issue' &&
+                node?.subject?.number
+              ) {
+                linkedIssueNumbers.add(node.subject.number);
+              }
+            }
+
+            const bodyClosingRefs = parseClosingReferencesFromBody(body);
+
+            if (linkedIssueNumbers.size === 0 && bodyClosingRefs.size === 0) {
+              core.setFailed('PR must have at least one linked issue.');
+              return;
+            }
+
+            core.info(`PR #${prNumber}`);
+            core.info(`PR body bytes: ${bodyBytes}`);
+            core.info(`Linked issues (GraphQL): ${Array.from(linkedIssueNumbers).join(', ') || 'none'}`);
+            core.info(`Linked issues (body keywords): ${Array.from(bodyClosingRefs).join(', ') || 'none'}`);
+            core.info('PR policy check passed.');
