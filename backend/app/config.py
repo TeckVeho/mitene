@@ -41,8 +41,8 @@ GCS_BUCKET: str | None = os.environ.get("GCS_BUCKET", "").strip() or None
 
 
 def _is_managed_google_cloud_runtime() -> bool:
-    """Cloud Run (K_SERVICE) or App Engine (GAE_SERVICE)."""
-    return bool(os.environ.get("K_SERVICE") or os.environ.get("GAE_SERVICE"))
+    """Cloud Run (K_SERVICE, CLOUD_RUN_JOB) or App Engine (GAE_SERVICE)."""
+    return bool(os.environ.get("K_SERVICE") or os.environ.get("CLOUD_RUN_JOB") or os.environ.get("GAE_SERVICE"))
 
 
 def _notebooklm_force_gcs_sync() -> bool:
