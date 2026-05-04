@@ -63,9 +63,9 @@ resource "google_sql_database_instance" "main" {
   root_password    = random_password.sql_root[0].result
 
   settings {
-    tier              = var.sql_tier
-    disk_size         = var.sql_disk_size_gb
-    disk_type         = "PD_SSD"
+    tier              = local.sql_tier_effective
+    disk_size         = local.sql_disk_size_gb_effective
+    disk_type         = local.sql_disk_type_effective
     activation_policy = "ALWAYS"
     ip_configuration {
       ipv4_enabled    = false

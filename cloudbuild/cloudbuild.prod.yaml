@@ -5,7 +5,7 @@
 #
 # Submit from repo root:
 #   gcloud builds submit --config=cloudbuild/cloudbuild.prod.yaml \
-#     --substitutions=_AR_PROJECT_ID=your-common-project,_DEPLOY_PROJECT_ID=your-prod-project,...
+#     --substitutions=_AR_PROJECT_ID=your-common-project,_DEPLOY_PROJECT_ID=your-prod-project .
 # Always override _NEXT_PUBLIC_* for your production API/web hosts.
 # Backend-only: cloudbuild/cloudbuild.prod.api.yaml
 # Web image only: cloudbuild/cloudbuild.prod.web.yaml

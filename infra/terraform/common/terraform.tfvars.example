@@ -1,3 +1,7 @@
+# =============================================================================
+# Copy to terraform.tfvars (local file is gitignored). Do not commit secrets.
+# =============================================================================
+
 project_id = "my-project-common"
 region     = "asia-northeast1"
 
@@ -10,7 +14,7 @@ reader_project_ids = [
   "my-project-prod",
 ]
 
-# optional: e.g. Cloud Run Service Agent for cross-project image pull (per app project number):
+# Optional (same pattern as Kumu common): Cloud Run Service Agent — needed when Cloud Run in an app project pulls from this registry and the default compute SA is not enough for your org:
 # gcloud projects describe APP_PROJECT_ID --format='value(projectNumber)' → service-{N}@serverless-robot-prod.iam.gserviceaccount.com
 # additional_artifact_registry_reader_members = [
 #   "serviceAccount:service-123456789012@serverless-robot-prod.iam.gserviceaccount.com",
@@ -21,3 +25,9 @@ reader_project_ids = [
 # additional_artifact_registry_writer_members = [
 #   "serviceAccount:123456789012@cloudbuild.gserviceaccount.com",
 # ]
+
+# --- Artifact Registry cleanup (optional; defaults in variables.tf) ---
+artifact_cleanup_keep_count                 = 10
+artifact_cleanup_policy_dry_run             = true # set false after Console preview looks correct
+artifact_cleanup_keep_tag_prefixes          = ["prod", "dev"] # optional KEEP for tags matching these prefixes
+artifact_cleanup_delete_untagged_after_days = 7               # DELETE UNTAGGED older than N days (use 14 for safer)

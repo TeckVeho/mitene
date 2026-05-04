@@ -2,11 +2,11 @@
 #
 # Builds+pushes mitene-web image, then deploys mitene-web-dev Cloud Run service.
 #
-# Always pass _AR_PROJECT_ID (Artifact Registry project) and _DEPLOY_PROJECT_ID
-# (Cloud Run target project) when using shared registry / cross-project deploy.
+# Always pass _AR_PROJECT_ID (Artifact Registry project), _DEPLOY_PROJECT_ID
+# (Cloud Run target project), and _NEXT_PUBLIC_* when using shared registry / cross-project deploy.
 # Submit from repo root:
 #   gcloud builds submit --config=cloudbuild/cloudbuild.dev.web.yaml \
-#     --substitutions=_AR_PROJECT_ID=...,_DEPLOY_PROJECT_ID=...,_NEXT_PUBLIC_API_URL=...,_NEXT_PUBLIC_BASE_URL=... .
+#     --substitutions=_AR_PROJECT_ID=your-common-project,_DEPLOY_PROJECT_ID=your-dev-project,_NEXT_PUBLIC_API_URL=https://YOUR-API/api,_NEXT_PUBLIC_BASE_URL=https://YOUR-WEB,_NEXT_PUBLIC_STORAGE_BACKEND=gcs .
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
