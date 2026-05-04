@@ -78,12 +78,12 @@ resource "google_cloud_run_v2_service" "api" {
 
   template {
     scaling {
-      min_instance_count = var.cloud_run_api_min_instances
-      max_instance_count = var.cloud_run_api_max_instances
+      min_instance_count = local.cloud_run_api_min_instances_effective
+      max_instance_count = local.cloud_run_api_max_instances_effective
     }
 
-    max_instance_request_concurrency = var.cloud_run_api_concurrency
-    timeout                          = var.cloud_run_api_timeout
+    max_instance_request_concurrency = local.cloud_run_api_concurrency_effective
+    timeout                          = local.cloud_run_api_timeout_effective
 
     dynamic "vpc_access" {
       for_each = var.enable_cloud_sql ? [1] : []
@@ -115,8 +115,8 @@ resource "google_cloud_run_v2_service" "api" {
 
       resources {
         limits = {
-          cpu    = var.cloud_run_api_cpu
-          memory = var.cloud_run_api_memory
+          cpu    = local.cloud_run_api_cpu_effective
+          memory = local.cloud_run_api_memory_effective
         }
         cpu_idle = true
       }
@@ -195,20 +195,20 @@ resource "google_cloud_run_v2_service" "web" {
 
   template {
     scaling {
-      min_instance_count = var.cloud_run_web_min_instances
-      max_instance_count = var.cloud_run_web_max_instances
+      min_instance_count = local.cloud_run_web_min_instances_effective
+      max_instance_count = local.cloud_run_web_max_instances_effective
     }
 
-    max_instance_request_concurrency = var.cloud_run_web_concurrency
-    timeout                          = var.cloud_run_web_timeout
+    max_instance_request_concurrency = local.cloud_run_web_concurrency_effective
+    timeout                          = local.cloud_run_web_timeout_effective
 
     containers {
       image = var.web_container_image
 
       resources {
         limits = {
-          cpu    = var.cloud_run_web_cpu
-          memory = var.cloud_run_web_memory
+          cpu    = local.cloud_run_web_cpu_effective
+          memory = local.cloud_run_web_memory_effective
         }
         cpu_idle = true
       }

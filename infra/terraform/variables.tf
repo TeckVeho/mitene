@@ -126,38 +126,44 @@ variable "web_custom_domain" {
 
 variable "cloud_run_api_min_instances" {
   type        = number
-  default     = 0
-  description = "Minimum instances for the API Cloud Run service (0 = scale to zero when idle)."
+  nullable    = true
+  default     = null
+  description = "Override API min instances; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_api_max_instances" {
   type        = number
-  default     = 10
-  description = "Maximum instances for the API Cloud Run service."
+  nullable    = true
+  default     = null
+  description = "Override API max instances; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_api_cpu" {
   type        = string
-  default     = "1"
-  description = "CPU limit for the API container (e.g. 1 or 1000m)."
+  nullable    = true
+  default     = null
+  description = "Override API CPU; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_api_memory" {
   type        = string
-  default     = "256Mi"
-  description = "Memory limit for the API container. With cpu_idle=true (main.tf), values below 512Mi are valid; otherwise Cloud Run requires at least 512Mi when CPU is always allocated."
+  nullable    = true
+  default     = null
+  description = "Override API memory; if null, use module.tier_specs from resource_tier. With cpu_idle=true (main.tf), values below 512Mi are valid."
 }
 
 variable "cloud_run_api_timeout" {
   type        = string
-  default     = "300s"
-  description = "Max request duration for the API service (e.g. 300s)."
+  nullable    = true
+  default     = null
+  description = "Override API timeout; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_api_concurrency" {
   type        = number
-  default     = 80
-  description = "Max concurrent requests per API instance."
+  nullable    = true
+  default     = null
+  description = "Override API concurrency; if null, use module.tier_specs from resource_tier."
 }
 
 # --- Cloud Run Job（動画 worker）: 有効時のみ API に JOB_DISPATCH_MODE=cloud_run_job を注入 ---
@@ -195,38 +201,44 @@ variable "cloud_run_worker_timeout" {
 
 variable "cloud_run_web_min_instances" {
   type        = number
-  default     = 0
-  description = "Minimum instances for the web Cloud Run service."
+  nullable    = true
+  default     = null
+  description = "Override web min instances; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_web_max_instances" {
   type        = number
-  default     = 10
-  description = "Maximum instances for the web Cloud Run service."
+  nullable    = true
+  default     = null
+  description = "Override web max instances; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_web_cpu" {
   type        = string
-  default     = "1"
-  description = "CPU limit for the web container."
+  nullable    = true
+  default     = null
+  description = "Override web CPU; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_web_memory" {
   type        = string
-  default     = "256Mi"
-  description = "Memory limit for the web container. With cpu_idle=true (main.tf), values below 512Mi are valid; otherwise Cloud Run requires at least 512Mi when CPU is always allocated."
+  nullable    = true
+  default     = null
+  description = "Override web memory; if null, use module.tier_specs from resource_tier. With cpu_idle=true (main.tf), values below 512Mi are valid."
 }
 
 variable "cloud_run_web_timeout" {
   type        = string
-  default     = "300s"
-  description = "Max request duration for the web service."
+  nullable    = true
+  default     = null
+  description = "Override web timeout; if null, use module.tier_specs from resource_tier."
 }
 
 variable "cloud_run_web_concurrency" {
   type        = number
-  default     = 80
-  description = "Max concurrent requests per web instance."
+  nullable    = true
+  default     = null
+  description = "Override web concurrency; if null, use module.tier_specs from resource_tier."
 }
 
 # --- Secrets: reference existing Secret Manager secrets (no values in tfvars) ---
@@ -268,7 +280,7 @@ variable "project_iam_members" {
 variable "resource_tier" {
   type        = string
   default     = ""
-  description = "Wiki resource tier (e.g. tier3). Used in terraform output and, when manage_gcp_project_labels is true, as the project label `tier` unless label_tier is set."
+  description = "Wiki resource tier (e.g. tier4, tier3). When empty, Cloud Run + Cloud SQL sizing defaults to tier4 via module.tier_specs (not valid for env_suffix prod — use tier3+). Used in output and as GCP label `tier` when manage_gcp_project_labels is true unless label_tier is set."
 }
 
 # --- GCP project label `tier` (wiki) ---
@@ -353,14 +365,23 @@ variable "sql_instance_name" {
 
 variable "sql_tier" {
   type        = string
-  default     = "db-f1-micro"
-  description = "Cloud SQL machine tier (cost/size)."
+  nullable    = true
+  default     = null
+  description = "Override Cloud SQL machine tier; if null, use module.tier_specs.sql_instance_tier from resource_tier."
 }
 
 variable "sql_disk_size_gb" {
   type        = number
-  default     = 10
-  description = "Disk size in GB."
+  nullable    = true
+  default     = null
+  description = "Override Cloud SQL disk size (GB); if null, use wiki tier_specs per tier + env_suffix→wiki env."
+}
+
+variable "sql_disk_type" {
+  type        = string
+  nullable    = true
+  default     = null
+  description = "Override PD_SSD or PD_HDD; if null, use wiki tier_specs."
 }
 
 variable "sql_database_name" {

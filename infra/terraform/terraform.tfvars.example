@@ -17,6 +17,11 @@
 project_id = "your-gcp-project-id"
 env_suffix = "dev"
 
+# Wiki tier (Veho terraform-modules tier_specs). Empty resource_tier also defaults sizing to tier4.
+# Tier4 has dev/stg rows only — for env_suffix = "prod" use tier3 (or tier2/tier1), e.g. uncomment below instead:
+# resource_tier = "tier3"
+resource_tier = "tier4"
+
 # Image must exist in Artifact Registry before deploy (build via Cloud Build).
 container_image = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/mitene-docker/mitene-api:dev"
 
@@ -88,8 +93,7 @@ web_env_vars = {
 #
 # Instance name default: mitene-mysql-{env_suffix}. Override to keep an existing instance id:
 # sql_instance_name = "legacy-instance-id-from-console"
-# sql_tier                 = "db-f1-micro"
-# sql_disk_size_gb         = 10
+# sql_tier / sql_disk_size_gb / sql_disk_type omitted → wiki tier_specs from resource_tier + env_suffix→wiki env (override if needed).
 # sql_database_name        = "mitene"
 # sql_user_name            = "mitene"
 # sql_deletion_protection  = false
@@ -113,30 +117,17 @@ web_env_vars = {
 # allow_unauthenticated     = true
 # allow_unauthenticated_web = true
 
-# --- Region & Cloud Run scaling / resources (optional) ---
-# Tier4 On-Demand (wiki): dev/stg only — max 2, timeout 120s; do not use Tier4 for prod.
-# See infra/wiki.md «Thông số Tier4».
+# --- Region ---
 # region = "asia-northeast1"
-# cloud_run_api_min_instances  = 0
-# cloud_run_api_max_instances  = 2
-# cloud_run_api_cpu            = "1"
-# cloud_run_api_memory         = "256Mi"   # main.tf sets cpu_idle=true so memory can be <512Mi (required if CPU always allocated)
-# cloud_run_api_timeout        = "120s"
-# cloud_run_api_concurrency    = 80
-# cloud_run_web_min_instances  = 0
-# cloud_run_web_max_instances  = 2
-# cloud_run_web_cpu            = "1"
-# cloud_run_web_memory         = "256Mi"   # same as API: cpu_idle=true in main.tf
-# cloud_run_web_timeout        = "120s"
-# cloud_run_web_concurrency    = 80
+#
+# Cloud Run API/Web + Cloud SQL sizing default from terraform-modules tier_specs (resource_tier; unset → tier4).
+# Override only when needed (nullable vars): cloud_run_api_*, cloud_run_web_*, sql_tier, sql_disk_size_gb, sql_disk_type.
 
 # --- Secret Manager references (create secrets in GCP first) ---
 # api_secret_env_from_sm = [
 #   { env_name = "JWT_SECRET", secret_id = "mitene-jwt-secret-dev", version = "latest" },
 # ]
 # web_secret_env_from_sm = []
-
-# resource_tier = "tier4"   # dev/stg only per wiki; use tier3+ for prod
 
 # --- GCP project label `tier` (wiki) ---
 # manage_gcp_project_labels = false

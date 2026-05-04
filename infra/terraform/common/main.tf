@@ -3,10 +3,48 @@ resource "google_project_service" "artifactregistry" {
 }
 
 resource "google_artifact_registry_repository" "docker" {
-  location      = var.region
-  repository_id = var.artifact_repo_id
-  description   = "Mitene Docker images (shared; dev/stg/prod pull from here)"
-  format        = "DOCKER"
+  location               = var.region
+  repository_id          = var.artifact_repo_id
+  description            = "Mitene Docker images (shared; dev/stg/prod pull from here)"
+  format                 = "DOCKER"
+  cleanup_policy_dry_run = var.artifact_cleanup_policy_dry_run
+
+  dynamic "cleanup_policies" {
+    for_each = length(var.artifact_cleanup_keep_tag_prefixes) > 0 ? [1] : []
+    content {
+      id     = "keep-tagged-prefixes"
+      action = "KEEP"
+      condition {
+        tag_state    = "TAGGED"
+        tag_prefixes = var.artifact_cleanup_keep_tag_prefixes
+      }
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-most-recent-per-package"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = var.artifact_cleanup_keep_count
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-old-untagged"
+    action = "DELETE"
+    condition {
+      tag_state  = "UNTAGGED"
+      older_than = "${var.artifact_cleanup_delete_untagged_after_days * 86400}s"
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-unmatched"
+    action = "DELETE"
+    condition {
+      tag_state = "ANY"
+    }
+  }
 
   depends_on = [
     google_project_service.artifactregistry,

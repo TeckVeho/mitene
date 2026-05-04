@@ -80,6 +80,14 @@ Replace `<COMMON_PROJECT_ID>` (your common / app project id) and URL placeholder
 - Cloud SQL: billing enabled, `sqladmin` API, Secret Manager; instance creation takes a few minutes.
 - Local `terraform.tfvars` / `terraform.tfvars.*` are **gitignored** — do not commit them. If they were ever committed, run `git rm --cached` on those paths and **rotate** any exposed secrets.
 
+### Wiki sizing (`tier_specs`)
+
+Cloud Run API/Web and Cloud SQL machine tier + disk defaults come from **`terraform-modules` [`tier_specs`](https://github.com/TeckVeho/terraform-modules/tree/develop/modules/tier_specs)** using **`resource_tier`** and **`env_suffix`** mapped to wiki environments (`dev` / `stg` / `prod`). When **`resource_tier`** is empty, Terraform treats sizing as **`tier4`** (Mitene default).
+
+**Important:** Tier4 only defines **dev** and **stg** in the wiki module — **`env_suffix = "prod"` requires `resource_tier`** such as **`tier3`** (or tier2/tier1). Omitting overrides (`cloud_run_api_*`, `cloud_run_web_*`, `sql_tier`, `sql_disk_*` left null) uses those wiki rows.
+
+First apply after switching from fixed defaults may propose Cloud SQL changes (for example disk type); review **`terraform plan`** carefully before apply.
+
 ### Wiki naming & project labels
 
 - **Cloud SQL instance id:** default **`mitene-mysql-{env_suffix}`** (e.g. `mitene-mysql-dev`). If you already have an instance under another pattern, set **`sql_instance_name`** to that id so Terraform does not try to replace it.
@@ -115,9 +123,10 @@ Adjust `env_suffix`, `cloud_run_service_name`, `container_image` (tag), and `web
 | `enable_gcs` | Create bucket + IAM for Cloud Run SA |
 | `enable_cloud_sql` | MySQL (private IP) + Secret `DATABASE_URL` + `/cloudsql` volume + **Direct VPC** (`PRIVATE_RANGES_ONLY`) on API Cloud Run |
 | `api_secret_env_from_sm` / `web_secret_env_from_sm` | Inject env vars from **existing** Secret Manager secrets; runtime SA gets `secretAccessor` |
-| `cloud_run_api_*` / `cloud_run_web_*` | Scaling, CPU, memory, timeout, concurrency for API / web services |
+| `cloud_run_api_*` / `cloud_run_web_*` | Optional overrides for API/web scaling, CPU, memory, timeout, concurrency — **null** uses [`tier_specs`](https://github.com/TeckVeho/terraform-modules/tree/develop/modules/tier_specs) from **`resource_tier`** |
+| `sql_tier` / `sql_disk_size_gb` / `sql_disk_type` | Optional Cloud SQL overrides — **null** uses **`tier_specs`** |
 | `project_iam_members` | Optional `google_project_iam_member` for groups/SAs (see org wiki) |
-| `resource_tier` | Tier for wiki / optional GCP label `tier` when labels are managed |
+| `resource_tier` | Wiki tier string (`tier4`, `tier3`, …); empty defaults sizing to **tier4** (invalid tier/env combos fail `plan`; prod needs tier3+) |
 | `sql_instance_name` | Override Cloud SQL instance id; default **`mitene-mysql-{env_suffix}`**. Set to the current instance id when migrating from older names |
 | `manage_gcp_project_labels` | If **true**, manage wiki label `tier` on the GCP project — **import required once** (see above); requires `label_tier` or `resource_tier` |
 | `label_tier` | Project label `tier` (e.g. `tier3`); empty falls back to `resource_tier` |
