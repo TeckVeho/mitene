@@ -1,13 +1,19 @@
 """
-Gemini API 動作確認スクリプト（方法A）
-.env から GEMINI_API_KEY を読み込んでテキスト生成を実行します。
+Gemini API 動作確認スクリプト
+.env から設定を読み込み、Developer API または Vertex AI でテキスト生成を実行します。
 """
 
 import os
+import sys
 from pathlib import Path
 
+# backend/ を import path に追加
+_backend_dir = Path(__file__).resolve().parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 # .env を手動で読み込む（python-dotenv 不要）
-env_path = Path(__file__).parent / ".env"
+env_path = _backend_dir / ".env"
 if env_path.exists():
     for line in env_path.read_text().splitlines():
         line = line.strip()
@@ -15,22 +21,32 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip())
 
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key or api_key == "your-gemini-api-key-here":
-    print("ERROR: GEMINI_API_KEY が設定されていません。backend/.env を確認してください。")
-    raise SystemExit(1)
+from app.services.gemini import (  # noqa: E402
+    DEFAULT_LLM_MODEL,
+    GeminiConfigError,
+    get_genai_client,
+    load_gemini_settings,
+)
 
-from google import genai
-
-client = genai.Client(api_key=api_key)
+settings = load_gemini_settings()
 
 print("=== Gemini API テスト ===")
-print(f"APIキー: {api_key[:10]}...（先頭10文字のみ表示）")
+if settings.uses_vertex:
+    print(f"モード: Vertex AI (project={settings.project_id}, location={settings.location})")
+else:
+    key = settings.api_key or ""
+    print(f"モード: Developer API (APIキー: {key[:10]}... 先頭10文字のみ表示)")
 print()
 
-print("▶ テキスト生成（gemini-2.5-flash）")
+try:
+    client = get_genai_client()
+except GeminiConfigError as exc:
+    print(f"ERROR: {exc}")
+    raise SystemExit(1) from exc
+
+print(f"▶ テキスト生成（{DEFAULT_LLM_MODEL}）")
 response = client.models.generate_content(
-    model="gemini-2.5-flash",
+    model=DEFAULT_LLM_MODEL,
     contents="こんにちは。あなたは何ができますか？3行以内で答えてください。",
 )
 print(response.text)

@@ -20,13 +20,22 @@ locals {
     } : {},
   ) : {}
 
+  vertex_ai_env = var.enable_vertex_ai ? {
+    VERTEX_AI          = "true"
+    VERTEX_AI_LOCATION = trimspace(var.vertex_ai_location) != "" ? trimspace(var.vertex_ai_location) : var.region
+  } : {}
+
+  api_secrets_effective = var.enable_vertex_ai ? [
+    for s in var.api_secret_env_from_sm : s if s.env_name != "GEMINI_API_KEY"
+  ] : var.api_secret_env_from_sm
+
   # API と Cloud Run Job worker で共通（worker のテンプレ env にも使う。JOB_DISPATCH は含めない）
   api_container_env_base = merge(
     var.enable_gcs ? {
       GCS_BUCKET     = local.gcs_bucket_name_effective
       GCP_PROJECT_ID = var.project_id
     } : {},
-    merge(var.env_vars, local.public_url_env_api),
+    merge(var.env_vars, local.public_url_env_api, local.vertex_ai_env),
   )
 
   api_worker_dispatch_env = var.enable_cloud_run_worker ? {
@@ -142,7 +151,7 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       dynamic "env" {
-        for_each = var.api_secret_env_from_sm
+        for_each = local.api_secrets_effective
         content {
           name = env.value.env_name
           value_source {

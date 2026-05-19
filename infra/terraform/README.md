@@ -138,6 +138,8 @@ Adjust `env_suffix`, `cloud_run_service_name`, `container_image` (tag), and `web
 | `sql_point_in_time_recovery_enabled` | PITR (transaction logs); requires `sql_backup_enabled`; extra cost — common for prod |
 | `enable_sql_night_weekend_schedule` | **Dev only:** Scheduler + Function to stop/start Cloud SQL on JST (`sql_schedule_*`) |
 | `sql_schedule_timezone` / `sql_schedule_start_cron` / `sql_schedule_stop_cron` | Customize schedule (default 08:00 / 22:00 Mon–Fri) |
+| `enable_vertex_ai` | If **true**, inject `VERTEX_AI=true` + `VERTEX_AI_LOCATION` on API/worker, enable `aiplatform.googleapis.com`, grant `roles/aiplatform.user` to Cloud Run SA, and **omit** `GEMINI_API_KEY` from Secret Manager injection. Local dev: leave false and set `GEMINI_API_KEY` in `backend/.env`. |
+| `vertex_ai_location` | Vertex AI region (default: `var.region`, e.g. `asia-northeast1`) |
 
 **Note:** When `enable_cloud_sql = true`, do **not** set `DATABASE_URL` in `env_vars` (enforced by a check). The app may still use the AWS SDK for S3 until you switch to GCS — bucket from `terraform output gcs_uploads_bucket`.
 

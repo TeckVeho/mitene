@@ -2,7 +2,7 @@
 
 locals {
   distinct_sm_secret_ids_for_runtime = distinct(concat(
-    [for s in var.api_secret_env_from_sm : s.secret_id],
+    [for s in local.api_secrets_effective : s.secret_id],
     [for s in var.web_secret_env_from_sm : s.secret_id],
   ))
 }

@@ -468,3 +468,21 @@ variable "sql_schedule_stop_cron" {
   default     = "0 22 * * 1-5"
   description = "Cron for stopping SQL (Mon–Fri evening). Default 22:00 in sql_schedule_timezone; Fri 22:00 → Mon 08:00 stays off."
 }
+
+# --- Vertex AI (Gemini via GCP ADC instead of GEMINI_API_KEY) ---
+
+variable "enable_vertex_ai" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    If true, inject VERTEX_AI=true on API Cloud Run + worker Job, enable aiplatform.googleapis.com,
+    grant roles/aiplatform.user to the Cloud Run runtime SA, and omit GEMINI_API_KEY from Secret Manager injection.
+    Local dev: leave false and set GEMINI_API_KEY in backend/.env.
+  EOT
+}
+
+variable "vertex_ai_location" {
+  type        = string
+  default     = ""
+  description = "Vertex AI region for generative models. Empty uses var.region (e.g. asia-northeast1)."
+}
