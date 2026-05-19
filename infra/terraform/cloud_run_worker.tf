@@ -78,7 +78,7 @@ resource "google_cloud_run_v2_job" "worker" {
         }
 
         dynamic "env" {
-          for_each = var.api_secret_env_from_sm
+          for_each = local.api_secrets_effective
           content {
             name = env.value.env_name
             value_source {

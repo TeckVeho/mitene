@@ -58,6 +58,7 @@ async def trigger_wiki_sync_directory(
     """指定ディレクトリ配下の .md ファイルのみを同期し、動画生成を実行する"""
     requested_paths = payload.paths if payload and payload.paths else None
     requested_path = payload.path if payload and payload.path is not None else path
+    requested_languages = payload.languages if payload else ["ja", "vi"]
 
     sync_id = f"sync_{uuid.uuid4().hex[:8]}"
 
@@ -65,6 +66,7 @@ async def trigger_wiki_sync_directory(
         await sync_wiki_from_directory(
             relative_dir=requested_path or "",
             target_paths=requested_paths,
+            languages=requested_languages,
             store_update_fn=database.store_update,
             run_job_fn=run_job,
             dispatch_video_job_fn=dispatch_video_job,

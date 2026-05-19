@@ -13,11 +13,10 @@ import os
 import sys
 from pathlib import Path
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logging.getLogger("notebooklm").setLevel(logging.DEBUG)
+import app.config  # noqa: F401 — load_dotenv before logging env is read
+from app.logging_config import configure_logging
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -59,11 +58,11 @@ async def _async_main() -> int:
         for fn in files:
             p = UPLOADS_DIR / f"{job_id}_{fn}"
             if p.is_file():
-                logger.info("worker source local hit job_id=%s path=%s", job_id, p)
+                logger.debug("worker source local hit job_id=%s path=%s", job_id, p)
                 source_paths.append(p)
                 continue
 
-            logger.info(
+            logger.debug(
                 "worker source local miss job_id=%s filename=%s path=%s, attempting restore",
                 job_id,
                 fn,

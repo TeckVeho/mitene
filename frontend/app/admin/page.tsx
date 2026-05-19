@@ -17,6 +17,7 @@ import {
   Monitor,
   RefreshCw,
   UploadCloud,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -25,7 +26,9 @@ const UploadSessionModal = lazy(() => import("@/components/auth/UploadSessionMod
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { AuthStatusValue, WikiDirectory } from "@/lib/types";
+import type { AuthStatusValue, VideoLanguage, WikiDirectory } from "@/lib/types";
+
+const DEFAULT_VIDEO_LANGUAGES: VideoLanguage[] = ["ja", "vi"];
 
 function getAuthConfig(t: ReturnType<typeof useLocale>["t"]): Record<AuthStatusValue, { label: string; icon: React.ElementType; className: string }> {
   return {
@@ -69,7 +72,9 @@ export default function AdminPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [remoteLoginOpen, setRemoteLoginOpen] = useState(false);
   const [credentialModalOpen, setCredentialModalOpen] = useState(false);
+  const [logoutSessionError, setLogoutSessionError] = useState<string | null>(null);
   const AUTH_CONFIG = getAuthConfig(t);
+  const isGcsBackend = process.env.NEXT_PUBLIC_STORAGE_BACKEND === "gcs";
 
   const { data: gateUser, isLoading: gateAuthLoading } = useQuery({
     queryKey: ["current-user"],
@@ -110,6 +115,7 @@ export default function AdminPage() {
 
   const [selectedDir, setSelectedDir] = useState<string>("__none__");
   const [selectedPartPaths, setSelectedPartPaths] = useState<string[]>([]);
+  const [selectedLanguages, setSelectedLanguages] = useState<VideoLanguage[]>(DEFAULT_VIDEO_LANGUAGES);
 
   const selectedDirectory = directories.find((d) => d.path === selectedDir);
   const selectedDirectoryFiles = selectedDirectory?.files ?? [];
@@ -133,6 +139,14 @@ export default function AdminPage() {
     ));
   };
 
+  const toggleLanguage = (lang: VideoLanguage) => {
+    setSelectedLanguages((prev) => (
+      prev.includes(lang)
+        ? prev.filter((l) => l !== lang)
+        : [...prev, lang]
+    ));
+  };
+
   const { mutate: triggerSyncFromGit, isPending: isSyncingFromGit } = useMutation({
     mutationFn: () => api.triggerWikiSyncFromGit(),
     onSuccess: (data) => {
@@ -145,7 +159,8 @@ export default function AdminPage() {
   });
 
   const { mutate: triggerSyncFromDir, isPending: isSyncingFromDir } = useMutation({
-    mutationFn: (payload: { path?: string; paths?: string[] }) => api.triggerWikiSyncFromDirectory(payload),
+    mutationFn: (payload: { path?: string; paths?: string[]; languages?: VideoLanguage[] }) =>
+      api.triggerWikiSyncFromDirectory(payload),
     onSuccess: (data) => {
       const msg = data.status === "success"
         ? (locale === "vi"
@@ -172,6 +187,18 @@ export default function AdminPage() {
     queryFn: () => api.getStats(),
     refetchInterval: 15000,
     enabled: gateUser?.isAdmin === true,
+  });
+
+  const { mutate: logoutNotebookLMSession, isPending: isLoggingOutSession } = useMutation({
+    mutationFn: () => api.logoutNotebookLMSession(),
+    onSuccess: () => {
+      setLogoutSessionError(null);
+      setSyncMessage(t.admin.notebookLMLogoutSessionSuccess);
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: () => {
+      setLogoutSessionError(t.admin.notebookLMLogoutSessionError);
+    },
   });
 
   if (gateAuthLoading || !gateUser || !gateUser.isAdmin) {
@@ -336,13 +363,45 @@ export default function AdminPage() {
                     <p className="text-xs text-muted-foreground">{t.admin.partHint}</p>
                   </div>
                 )}
+                <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                  <p className="text-xs font-medium text-foreground">{t.admin.videoLanguageTitle}</p>
+                  <div className="space-y-1">
+                    {(["ja", "vi"] as const).map((lang) => {
+                      const checked = selectedLanguages.includes(lang);
+                      const label = lang === "ja" ? t.admin.videoLanguageJa : t.admin.videoLanguageVi;
+                      return (
+                        <label
+                          key={lang}
+                          className={cn(
+                            "flex items-center gap-2 rounded px-1.5 py-1 text-sm cursor-pointer hover:bg-muted/60",
+                            checked && "bg-muted"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleLanguage(lang)}
+                            className="size-4 accent-primary"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {selectedLanguages.length === 0 && (
+                    <p className="text-xs text-amber-700">{t.admin.selectAtLeastOneLanguage}</p>
+                  )}
+                </div>
                 <div className="flex justify-end">
                   <Button
                     size="sm"
                     onClick={() => {
                       const payload = hasPartSelector
-                        ? { path: selectedDir, paths: selectedPartPaths }
-                        : { path: selectedDir === "__none__" ? "" : selectedDir };
+                        ? { path: selectedDir, paths: selectedPartPaths, languages: selectedLanguages }
+                        : {
+                            path: selectedDir === "__none__" ? "" : selectedDir,
+                            languages: selectedLanguages,
+                          };
                       triggerSyncFromDir(payload);
                     }}
                     disabled={
@@ -350,6 +409,7 @@ export default function AdminPage() {
                       || syncStatus?.is_syncing
                       || selectedDir === "__none__"
                       || (hasPartSelector && selectedPartPaths.length === 0)
+                      || selectedLanguages.length === 0
                     }
                     className="gap-1.5"
                   >
@@ -375,15 +435,38 @@ export default function AdminPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div
-              className={cn(
-                "flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium",
-                authCfg.className
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium",
+                  authCfg.className
+                )}
+              >
+                <AuthIcon className="size-4 shrink-0" />
+                {authCfg.label}
+              </div>
+              {isGcsBackend && authState === "authenticated" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={isLoggingOutSession}
+                  onClick={() => logoutNotebookLMSession()}
+                >
+                  {isLoggingOutSession ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <LogOut className="size-3.5" />
+                  )}
+                  {t.admin.notebookLMLogoutSession}
+                </Button>
               )}
-            >
-              <AuthIcon className="size-4 shrink-0" />
-              {authCfg.label}
             </div>
+
+            {logoutSessionError && (
+              <p className="text-xs text-red-600">{logoutSessionError}</p>
+            )}
 
             <p className="text-xs text-muted-foreground">
               {t.admin.notebookLMDesc}

@@ -116,6 +116,9 @@ export interface Translations {
     notebookLMCookieModalStep3: string;
     notebookLMCookieUploadButton: string;
     notebookLMCookieUploading: string;
+    notebookLMLogoutSession: string;
+    notebookLMLogoutSessionSuccess: string;
+    notebookLMLogoutSessionError: string;
     adminRemoteLoginTitle: string;
     adminRemoteLoginNote: string;
     reLogin: string;
@@ -138,6 +141,10 @@ export interface Translations {
     selectParts: string;
     allParts: string;
     partHint: string;
+    videoLanguageTitle: string;
+    videoLanguageJa: string;
+    videoLanguageVi: string;
+    selectAtLeastOneLanguage: string;
     createVideos: string;
     noDirectories: string;
     videosList: string;

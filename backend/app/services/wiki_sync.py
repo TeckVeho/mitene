@@ -458,6 +458,7 @@ def sync_wiki_from_git_source() -> dict:
 async def sync_wiki_from_directory(
     relative_dir: str,
     target_paths: Optional[list[str]] = None,
+    languages: Optional[list[str]] = None,
     store_update_fn=None,
     run_job_fn=None,
     dispatch_video_job_fn=None,
@@ -473,6 +474,10 @@ async def sync_wiki_from_directory(
 
     if _sync_status["is_syncing"] or _sync_status.get("wiki_source_syncing"):
         return {"status": "already_running", "message": "同期が既に実行中です"}
+
+    langs = languages or ["ja", "vi"]
+    if not langs:
+        return {"status": "error", "message": "言語を1つ以上選択してください"}
 
     _sync_status["is_syncing"] = True
     _sync_status["error"] = None
@@ -577,7 +582,7 @@ async def sync_wiki_from_directory(
                         "vi": f"Video giải thích quy tắc nội bộ về {title}",
                     }
 
-                    for lang in ("ja", "vi"):
+                    for lang in langs:
                         job_id = f"job_{_uuid.uuid4().hex[:12]}"
                         now = datetime.now(timezone.utc).isoformat()
 

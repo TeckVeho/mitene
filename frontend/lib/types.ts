@@ -2,6 +2,8 @@
 // E-learning types
 // ---------------------------------------------------------------------------
 
+export type VideoLanguage = "ja" | "vi";
+
 export interface Video {
   id: string;
   title: string;

@@ -126,8 +126,13 @@ web_env_vars = {
 # --- Secret Manager references (create secrets in GCP first) ---
 # api_secret_env_from_sm = [
 #   { env_name = "JWT_SECRET", secret_id = "mitene-jwt-secret-dev", version = "latest" },
+#   { env_name = "GEMINI_API_KEY", secret_id = "mitene-gemini-api-key-dev", version = "latest" },
 # ]
 # web_secret_env_from_sm = []
+
+# --- Vertex AI (Gemini via GCP ADC; omit GEMINI_API_KEY injection when enabled) ---
+# enable_vertex_ai = true
+# vertex_ai_location = "asia-northeast1"   # optional; default = var.region
 
 # --- GCP project label `tier` (wiki) ---
 # manage_gcp_project_labels = false

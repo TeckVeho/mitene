@@ -8,8 +8,6 @@ E-learning バックエンド API — application factory.
 
 from __future__ import annotations
 
-import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -18,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.config  # noqa: F401 — load_dotenv before database reads env
 import database
+from app.logging_config import configure_logging
 from app.config import _CORS_ORIGINS
 from app.job_runtime import job_semaphore
 from app.routers import admin, auth, categories, comments, jobs, remote_login, settings, users, videos, wiki
@@ -29,12 +28,7 @@ from app.services.notebooklm_gcs import (
 )
 from app.services.runner import run_job
 
-_log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, _log_level_name, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logging.getLogger("notebooklm").setLevel(logging.DEBUG)
+configure_logging()
 
 
 @asynccontextmanager
