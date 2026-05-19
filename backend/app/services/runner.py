@@ -341,7 +341,7 @@ async def run_job(
                 progress = f"({idx}/{total})" if total > 1 else ""
                 ext = source_path.suffix.lower()
                 file_type = "Markdown" if ext == ".md" else "CSV"
-                logger.info(
+                logger.debug(
                     "run_job add_source uploading job_id=%s source=%s index=%d/%d type=%s",
                     job_id,
                     source_path,
@@ -386,7 +386,7 @@ async def run_job(
                             {"event": "job.error", "job_id": job_id, "status": "error", "error_message": error_msg},
                         )
                     return
-                logger.info(
+                logger.debug(
                     "run_job add_source ready job_id=%s source_id=%s source=%s",
                     job_id,
                     source.id,
@@ -474,7 +474,7 @@ async def run_job(
             )
             # notebooklm-py reads storage_state.json from disk again for MP4 download; refresh
             # from GCS when sync is enabled so the file exists after cold start or rare races.
-            logger.info(
+            logger.debug(
                 "run_job refresh NotebookLM storage from GCS before download_video job_id=%s path=%s",
                 job_id,
                 STORAGE_STATE,
@@ -482,14 +482,14 @@ async def run_job(
             t_sync_start = time.monotonic()
             download_storage_state_if_configured()
             sync_elapsed = time.monotonic() - t_sync_start
-            logger.info(
+            logger.debug(
                 "run_job storage sync before download done job_id=%s elapsed_sec=%.3f",
                 job_id,
                 sync_elapsed,
             )
 
             effective_download_timeout = _effective_phase_timeout_sec(timeout)
-            logger.info(
+            logger.debug(
                 "run_job download_video start job_id=%s notebook_id=%s output_path=%s timeout_sec=%s",
                 job_id,
                 nb.id,
@@ -530,7 +530,7 @@ async def run_job(
 
             dl_elapsed = time.monotonic() - t_dl_start
             out_size = output_path.stat().st_size if output_path.is_file() else 0
-            logger.info(
+            logger.debug(
                 "run_job video downloaded job_id=%s notebook_id=%s output_path=%s "
                 "size_bytes=%s elapsed_sec=%.3f",
                 job_id,
@@ -550,7 +550,7 @@ async def run_job(
                     None, storage_mod.extract_thumbnail_locally, job_id, output_path
                 )
                 thumbnail_generated = True
-                logger.info("run_job thumbnail generated job_id=%s path=%s", job_id, thumbnail_path)
+                logger.debug("run_job thumbnail generated job_id=%s path=%s", job_id, thumbnail_path)
             except Exception as thumb_exc:
                 logger.warning(
                     "run_job thumbnail generation failed (continue): job_id=%s err=%s",
@@ -564,7 +564,7 @@ async def run_job(
                         await asyncio.get_event_loop().run_in_executor(
                             None, storage_mod.upload_thumbnail_to_s3, job_id, thumbnail_path
                         )
-                        logger.info("run_job thumbnail upload success job_id=%s", job_id)
+                        logger.debug("run_job thumbnail upload success job_id=%s", job_id)
                     except Exception as thumb_exc:
                         logger.warning(
                             "run_job thumbnail upload failed (continue): job_id=%s err=%s",
@@ -572,13 +572,13 @@ async def run_job(
                             thumb_exc,
                         )
                         if thumbnail_path.exists():
-                            logger.info(
+                            logger.debug(
                                 "run_job keep local thumbnail for debugging: job_id=%s path=%s",
                                 job_id,
                                 thumbnail_path,
                             )
 
-                logger.info(
+                logger.debug(
                     "run_job s3 upload start job_id=%s output_path=%s",
                     job_id,
                     output_path,
@@ -588,7 +588,7 @@ async def run_job(
                     message="MP4 を S3 にアップロード中..."
                 )
                 effective_upload_timeout = _effective_phase_timeout_sec(timeout)
-                logger.info(
+                logger.debug(
                     "run_job mp4 remote upload start job_id=%s output_path=%s timeout_sec=%s",
                     job_id,
                     output_path,
@@ -628,7 +628,7 @@ async def run_job(
                         )
                     return
 
-                logger.info(
+                logger.debug(
                     "run_job s3 upload success job_id=%s elapsed_sec=%.3f",
                     job_id,
                     time.monotonic() - t_up_start,

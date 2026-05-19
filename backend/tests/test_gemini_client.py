@@ -5,8 +5,11 @@ from __future__ import annotations
 import pytest
 
 from app.services.gemini import (
+    DEFAULT_TTS_MODEL,
     GeminiConfigError,
+    TTS_VERTEX_LOCATION,
     create_genai_client,
+    create_genai_tts_client,
     load_gemini_settings,
     resolve_gemini_backend,
 )
@@ -118,4 +121,34 @@ def test_create_client_vertex_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         "vertexai": True,
         "project": "proj-1",
         "location": "asia-northeast1",
+    }
+
+
+def test_default_tts_model_and_vertex_location() -> None:
+    assert DEFAULT_TTS_MODEL == "gemini-2.5-flash-tts"
+    assert TTS_VERTEX_LOCATION == "global"
+
+
+def test_create_tts_client_vertex_uses_global_location(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+
+    settings = load_gemini_settings(
+        {
+            "VERTEX_AI": "true",
+            "GCP_PROJECT_ID": "proj-1",
+            "VERTEX_AI_LOCATION": "asia-northeast1",
+        }
+    )
+    create_genai_tts_client(settings)
+
+    assert captured == {
+        "vertexai": True,
+        "project": "proj-1",
+        "location": "global",
     }

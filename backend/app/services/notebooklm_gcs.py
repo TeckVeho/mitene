@@ -122,3 +122,40 @@ def upload_storage_state_if_configured() -> None:
         )
     except Exception as exc:
         logger.error("NotebookLM GCS: upload failed: %s", exc)
+
+
+def _delete_local_storage_state() -> None:
+    path = Path(STORAGE_STATE)
+    if not path.is_file():
+        return
+    try:
+        path.unlink()
+        logger.info("NotebookLM: removed local session file: %s", path)
+    except OSError as exc:
+        logger.warning("NotebookLM: could not remove local file %s: %s", path, exc)
+        raise
+
+
+def delete_storage_state_if_configured() -> None:
+    """Remove NotebookLM session from GCS (when sync enabled) and from local disk."""
+    if NOTEBOOKLM_GCS_SYNC_ENABLED and GCS_BUCKET:
+        try:
+            bucket = _client().bucket(GCS_BUCKET)
+            blob = bucket.blob(NOTEBOOKLM_GCS_OBJECT_KEY)
+            if blob.exists():
+                blob.delete()
+                logger.info(
+                    "NotebookLM GCS: deleted gs://%s/%s",
+                    GCS_BUCKET,
+                    NOTEBOOKLM_GCS_OBJECT_KEY,
+                )
+            else:
+                logger.info(
+                    "NotebookLM GCS: object gs://%s/%s not found (nothing to delete)",
+                    GCS_BUCKET,
+                    NOTEBOOKLM_GCS_OBJECT_KEY,
+                )
+        except Exception as exc:
+            logger.error("NotebookLM GCS: delete failed: %s", exc)
+            raise
+    _delete_local_storage_state()

@@ -17,7 +17,10 @@ from app.config import FRONTEND_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, STO
 from app.dependencies import require_admin_user
 from app.schemas.auth import AuthStatus, LoginResponse, UploadSessionRequest
 from app.services.notebooklm_auth import check_auth_status_strict, find_notebooklm
-from app.services.notebooklm_gcs import upload_storage_state_if_configured
+from app.services.notebooklm_gcs import (
+    delete_storage_state_if_configured,
+    upload_storage_state_if_configured,
+)
 from app.services.notebooklm_session_upload import assert_has_sid, session_json_to_playwright_state
 from app.services.oauth import allowed_oauth_frontends, oauth_state_decode, oauth_state_encode, resolve_oauth_frontend
 
@@ -112,6 +115,15 @@ async def upload_session_file(
 
     return LoginResponse(message="認証情報を保存しました。")
 
+
+@router.delete("/session", response_model=LoginResponse)
+async def logout_session(_admin: Annotated[dict, Depends(require_admin_user)]):
+    """Delete NotebookLM storage_state from GCS (when configured) and local disk."""
+    try:
+        delete_storage_state_if_configured()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"セッションの削除に失敗しました: {e}") from e
+    return LoginResponse(message="NotebookLMセッションを削除しました。")
 
 
 @router.get("/github")

@@ -15,6 +15,7 @@ import type {
   WikiDirectory,
   ArticleRecord,
   AdminVideoPatch,
+  VideoLanguage,
 } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
@@ -241,6 +242,15 @@ function uploadSessionErrorMessage(data: unknown): string {
   return "セッションのアップロードに失敗しました";
 }
 
+async function realLogoutNotebookLMSession(): Promise<{ message: string }> {
+  const res = await fetch(`${BASE_URL}/auth/session`, withUserAuth({ method: "DELETE" }));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(uploadSessionErrorMessage(data));
+  }
+  return res.json();
+}
+
 async function realUploadNotebookLMSessionFile(file: File): Promise<{ message: string }> {
   const fd = new FormData();
   fd.append("file", file);
@@ -305,7 +315,11 @@ async function realGetWikiDirectories(): Promise<WikiDirectory[]> {
   return res.json();
 }
 
-async function realTriggerWikiSyncFromDirectory(payload: { path?: string; paths?: string[] }): Promise<WikiSyncResult> {
+async function realTriggerWikiSyncFromDirectory(payload: {
+  path?: string;
+  paths?: string[];
+  languages?: VideoLanguage[];
+}): Promise<WikiSyncResult> {
   const res = await fetch(
     `${BASE_URL}/wiki/sync-directory`,
     withUserAuth({
@@ -388,6 +402,7 @@ export const api = {
 
   getAuthStatus: realGetAuthStatus,
   triggerLogin: realTriggerLogin,
+  logoutNotebookLMSession: realLogoutNotebookLMSession,
   uploadNotebookLMSessionFile: realUploadNotebookLMSessionFile,
   getApiInfo: realGetApiInfo,
 
